@@ -11,41 +11,17 @@ class TyreAnalyzer:
         # Each: list of dicts with keys: time, avg, l, c, r
         self.history = [[], [], [], []]
         
-        self.target_min = 85.0
-        self.target_max = 90.0
+        # Updated Targets based on Lastenheft
+        self.target_min = 75.0
+        self.target_max = 85.0
         
         self.is_stable = [False] * 4
         self.stability_threshold = 3.0 # degrees Celsius variation allowed in history window
         
         self.tyre_names = ["FL", "FR", "RL", "RR"]
-        
-        # New: Stability State Machine
-        self.STATE_GATHERING = "GATHERING" # First 2 laps
-        self.STATE_CHECKING = "CHECKING"   # Analyzing variance
-        self.STATE_STABLE = "STABLE"       # Ready for pit
-        self.STATE_UNSTABLE = "UNSTABLE"   # Needs more laps
-        
-        self.current_state = self.STATE_GATHERING
-        self.laps_completed = 0
-        self.min_laps_required = 2
-        self.start_lap = 0 # Lap count when we started gathering
 
-    def update(self, data, laps_completed):
+    def update(self, data):
         current_time = time.time()
-        
-        # Update lap count
-        self.laps_completed = laps_completed
-        
-        # Initialize start_lap if we just reset
-        if self.start_lap == -1:
-            self.start_lap = laps_completed
-        
-        # State Transition: GATHERING -> CHECKING
-        # Check if we have driven enough laps SINCE the last reset
-        laps_driven_since_reset = self.laps_completed - self.start_lap
-        
-        if self.current_state == self.STATE_GATHERING and laps_driven_since_reset >= self.min_laps_required:
-            self.current_state = self.STATE_CHECKING
         
         # Only sample at defined rate
         if current_time - self.last_sample_time < (1.0 / self.sample_rate):
@@ -59,8 +35,8 @@ class TyreAnalyzer:
             
         # Check if moving and not in pits
         if data.mPitMode != 0 or data.mSpeed < 5.0:
-            if data.mPitMode != 0:
-                self.reset()
+            # Do NOT reset here, otherwise we lose data when entering pits for analysis!
+            # The RaceEngineer handles the reset when starting a new run.
             return
 
         # Collect Data
@@ -82,16 +58,6 @@ class TyreAnalyzer:
                 self.history[i].pop(0)
                 
             self._check_stability(i)
-            
-        # Update State based on stability
-        if self.current_state == self.STATE_CHECKING:
-            if all(self.is_stable):
-                self.current_state = self.STATE_STABLE
-            else:
-                # If we have enough history but still not stable, we might need to stay in checking/unstable
-                # For now, let's toggle between CHECKING and UNSTABLE for feedback
-                # Actually, let's keep it simple: If in checking phase and not stable -> Unstable
-                pass 
 
     def _check_stability(self, i):
         # Need at least 80% of the history window filled
@@ -101,6 +67,10 @@ class TyreAnalyzer:
             
         temps = [h['avg'] for h in self.history[i]]
         
+        if not temps:
+            self.is_stable[i] = False
+            return
+
         if (max(temps) - min(temps)) < self.stability_threshold:
             self.is_stable[i] = True
         else:
@@ -109,40 +79,17 @@ class TyreAnalyzer:
     def reset(self):
         self.history = [[], [], [], []]
         self.is_stable = [False] * 4
-        self.current_state = self.STATE_GATHERING
-        self.start_lap = -1 # Will be set on next update
-        # Note: We don't reset laps_completed here as that comes from the game
 
-    def get_status_message(self):
-        if self.current_state == self.STATE_GATHERING:
-            laps_driven = self.laps_completed - self.start_lap if self.start_lap != -1 else 0
-            # Ensure we don't show negative numbers
-            laps_driven = max(0, laps_driven)
-            return f"Sammle Daten (Runde {laps_driven}/{self.min_laps_required})..."
-        
-        elif self.current_state == self.STATE_CHECKING or self.current_state == self.STATE_UNSTABLE:
-            if all(self.is_stable):
-                self.current_state = self.STATE_STABLE
-                return "Bitte in die Box kommen!"
-            else:
-                return "Noch eine Runde. Werte zu unkonstant!"
-                
-        elif self.current_state == self.STATE_STABLE:
-            return "Bitte in die Box kommen!"
-            
-        return "Status unbekannt"
-
-    def get_status(self):
-        # Legacy method for compatibility, redirects to new message logic
-        return self.get_status_message()
+    def are_all_stable(self):
+        return all(self.is_stable)
 
     def get_analysis(self):
-        # Only return analysis if we are STABLE
-        if self.current_state != self.STATE_STABLE:
-            return None
-            
+        # Return analysis regardless of stability, caller decides when to show it
         results = {}
         for i in range(4):
+            if not self.history[i]:
+                continue
+
             # Calculate averages over the history
             avg_t = statistics.mean([h['avg'] for h in self.history[i]])
             avg_l = statistics.mean([h['l'] for h in self.history[i]])
