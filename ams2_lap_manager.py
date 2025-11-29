@@ -73,7 +73,9 @@ class LapTimeManager:
                     import time
                     time.sleep(1)
                 else:
-                    print(f"ERROR: Could not save '{self.filename}'. Is it open in Excel? Please close it.")
+                    abs_path = os.path.abspath(self.filename)
+                    print(f"ERROR: Could not save '{abs_path}'. Permission denied.")
+                    print("Please check if the file is read-only or blocked by another program (e.g. Antivirus, OneDrive).")
             except Exception as e:
                 print(f"Error saving laps: {e}")
                 break

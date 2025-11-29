@@ -3,9 +3,12 @@ import time
 
 class TyreAnalyzer:
     def __init__(self):
-        self.history_duration = 30 # seconds to look back for stability
+        self.history_duration = 90 # seconds to look back for stability (approx 1.5 laps)
         self.sample_rate = 1.0 # Hz
-        self.last_sample_time = 0
+        
+        self.last_game_time = -1.0
+        self.internal_time = 0.0
+        self.last_sample_internal_time = -1.0
         
         # History: [FL, FR, RL, RR]
         # Each: list of dicts with keys: time, avg, l, c, r
@@ -21,23 +24,40 @@ class TyreAnalyzer:
         self.tyre_names = ["FL", "FR", "RL", "RR"]
 
     def update(self, data):
-        current_time = time.time()
+        # Robust Time Tracking
+        # We accumulate delta_time to create a monotonic internal_time
+        # This handles Pauses (dt=0) and Time Wraps/Resets (dt<0) gracefully
         
-        # Only sample at defined rate
-        if current_time - self.last_sample_time < (1.0 / self.sample_rate):
-            return
-
-        self.last_sample_time = current_time
+        current_game_time = data.mCurrentTime
         
+        if self.last_game_time < 0:
+            self.last_game_time = current_game_time
+            return # Wait for next frame to have a delta
+            
+        dt = current_game_time - self.last_game_time
+        self.last_game_time = current_game_time
+        
+        # If dt is negative (time wrap/reset), we ignore it (dt=0)
+        if dt < 0: dt = 0
+            
         # Check if valid driving state (GameState 2 = Playing)
         if data.mGameState != 2: 
             return
             
         # Check if moving and not in pits
+        # If we are NOT moving fast enough, we do NOT advance internal_time.
+        # This "pauses" the history window so we don't lose data while standing still or driving slow.
         if data.mPitMode != 0 or data.mSpeed < 5.0:
-            # Do NOT reset here, otherwise we lose data when entering pits for analysis!
-            # The RaceEngineer handles the reset when starting a new run.
             return
+
+        # Only advance internal time if we are actually sampling/driving
+        self.internal_time += dt
+        
+        # Only sample at defined rate
+        if self.last_sample_internal_time < 0 or (self.internal_time - self.last_sample_internal_time) >= (1.0 / self.sample_rate):
+             self.last_sample_internal_time = self.internal_time
+        else:
+             return
 
         # Collect Data
         for i in range(4):
@@ -47,14 +67,17 @@ class TyreAnalyzer:
             t_r = data.mTyreTempRight[i]
             
             self.history[i].append({
-                'time': current_time,
+                'time': self.internal_time,
                 'avg': t_avg,
                 'l': t_l,
                 'c': t_c,
                 'r': t_r
             })
             
-            while self.history[i] and (current_time - self.history[i][0]['time'] > self.history_duration):
+            # Limit history by COUNT, not time check (prevents shrinking between samples)
+            # We want history_duration seconds at sample_rate Hz
+            max_samples = int(self.history_duration * self.sample_rate)
+            while len(self.history[i]) > max_samples:
                 self.history[i].pop(0)
                 
             self._check_stability(i)
@@ -77,11 +100,26 @@ class TyreAnalyzer:
             self.is_stable[i] = False
 
     def reset(self):
+        print("DEBUG: TyreAnalyzer Reset called!")
         self.history = [[], [], [], []]
         self.is_stable = [False] * 4
+        self.last_game_time = -1.0
+        self.internal_time = 0.0
+        self.last_sample_internal_time = -1.0
 
     def are_all_stable(self):
         return all(self.is_stable)
+
+    def get_progress(self):
+        # Calculate progress based on filled history
+        # We need history_duration * sample_rate samples
+        target_samples = self.history_duration * self.sample_rate
+        
+        # Find the tire with the LEAST history to be conservative
+        min_samples = min([len(h) for h in self.history])
+        
+        progress = (min_samples / target_samples) * 100.0
+        return min(100.0, max(0.0, progress))
 
     def get_analysis(self):
         # Return analysis regardless of stability, caller decides when to show it

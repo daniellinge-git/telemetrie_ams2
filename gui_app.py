@@ -13,6 +13,8 @@ from ams2_reader import AMS2Reader
 from ams2_race_engineer import RaceEngineer
 from track_recorder import TrackRecorder
 from ams2_lap_manager import LapTimeManager
+from ams2_fuel_monitor import FuelMonitor
+from ams2_wear_monitor import WearMonitor
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -29,11 +31,17 @@ class MainWindow(QMainWindow):
         self.engineer = RaceEngineer()
         self.recorder = TrackRecorder()
         self.lap_manager = LapTimeManager()
+        self.fuel_monitor = FuelMonitor()
+        self.wear_monitor = WearMonitor()
         self.connected = False
         
         # State tracking
         self.last_lap = -1
-        
+        self.best_sectors = [0.0, 0.0, 0.0] # S1, S2, S3
+        self.first_update = True
+
+        # Main Layout
+
         # Main Layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -195,9 +203,9 @@ class MainWindow(QMainWindow):
                 
             label.setText(text)
 
-        set_sector_label(self.lbl_s1, data.mCurrentSector1Time, data.mPersonalFastestSector1Time, "S1")
-        set_sector_label(self.lbl_s2, data.mCurrentSector2Time, data.mPersonalFastestSector2Time, "S2")
-        set_sector_label(self.lbl_s3, data.mCurrentSector3Time, data.mPersonalFastestSector3Time, "S3")
+        set_sector_label(self.lbl_s1, data.mCurrentSector1Time, self.best_sectors[0], "S1")
+        set_sector_label(self.lbl_s2, data.mCurrentSector2Time, self.best_sectors[1], "S2")
+        set_sector_label(self.lbl_s3, data.mCurrentSector3Time, self.best_sectors[2], "S3")
 
         # Always check for urgent engineer messages first
         msg = self.engineer.get_message()
@@ -236,10 +244,92 @@ class MainWindow(QMainWindow):
                     self.feedback_text.setText("PAUSED. Not enough data for analysis yet.<br>Drive at least 2 clean laps.")
         
         elif data.mGameState == 2: # Playing
-            self.feedback_text.setText(f"<b>RACE ENGINEER:</b><br>{msg}")
+            # Check if we are in Gathering/Checking phase to show live stats
+            if "Analysiere" in msg or "Sammle Daten" in msg:
+                # Show Live Analysis Stats
+                prog = self.engineer.tyre_analyzer.get_progress()
+                text = f"<b>RACE ENGINEER:</b><br>{msg}<br><br>"
+                text += f"<b>Live Analysis ({prog:.0f}%):</b><br>"
+                text += "Target: 75C - 85C<br>"
+                
+                # Get current averages from analyzer history if available, else current temp
+                # We can access the analyzer directly via self.engineer.tyre_analyzer
+                analyzer = self.engineer.tyre_analyzer
+                for i, name in enumerate(analyzer.tyre_names):
+                    # Get last recorded temp from history if exists
+                    current_temp = data.mTyreTemp[i]
+                    avg_temp = current_temp
+                    if analyzer.history[i]:
+                        avg_temp = sum(x['avg'] for x in analyzer.history[i]) / len(analyzer.history[i])
+                    
+                    color = "white"
+                    if avg_temp < analyzer.target_min: color = "#00bfff" # Blue/Cold
+                    elif avg_temp > analyzer.target_max: color = "#ff4500" # Red/Hot
+                    else: color = "#00ff00" # Green/OK
+                    
+                    text += f"{name}: <span style='color:{color}'>{avg_temp:.1f}C</span> (Curr: {current_temp:.0f}C)<br>"
+                
+                self.feedback_text.setText(text)
+                self.feedback_text.setText(text)
+            else:
+                self.feedback_text.setText(f"<b>RACE ENGINEER:</b><br>{msg}")
+        
+        # --- Fuel & Wear Info (Always show if playing) ---
+        if data.mGameState == 2 or data.mGameState == 3: # Playing or Pause
+            fuel_status = self.fuel_monitor.get_status(data.mFuelLevel, data.mFuelCapacity)
+            wear_status = self.wear_monitor.get_status(data.mTyreWear)
+            
+            info_text = "<br><hr><b>VEHICLE STATUS:</b><br>"
+            
+            # Fuel
+            rem_laps = f"{fuel_status['remaining_laps']:.1f}" if fuel_status['remaining_laps'] < 100 else ">100"
+            info_text += f"Fuel: {fuel_status['liters']:.1f}L ({rem_laps} Laps left)<br>"
+            
+            # Wear
+            info_text += "Tyres (Rem. Laps):<br>"
+            # Grid layout for tyres? Just text for now
+            # FL FR
+            # RL RR
+            
+            def fmt_wear(w):
+                laps = f"{w['remaining_laps']:.1f}" if w['remaining_laps'] < 100 else ">100"
+                return f"{w['wear_percent']:.0f}% ({laps}L)"
+                
+            info_text += f"FL: {fmt_wear(wear_status['FL'])} | FR: {fmt_wear(wear_status['FR'])}<br>"
+            info_text += f"RL: {fmt_wear(wear_status['RL'])} | RR: {fmt_wear(wear_status['RR'])}<br>"
+            
+            # Append to existing text
+            current_text = self.feedback_text.text()
+            # Avoid duplicating if we update frequently? setText replaces content, so it's fine.
+            # But we need to make sure we don't overwrite the Engineer message if we just set it above.
+            # Actually, setText overwrites. So we should append.
+            
+            self.feedback_text.setText(current_text + info_text)
         
         else:
-            self.feedback_text.setText("Waiting for session...")
+            # GameState 1 (Menu) or others
+            # If we have analysis ready (e.g. in Pit Menu), SHOW IT!
+            analysis = self.engineer.get_analysis()
+            if analysis['ready']:
+                text = "<b>PIT MENU - SETUP ANALYSIS</b><br><br>"
+                
+                # Tyres
+                text += "<b>TYRES:</b><br>"
+                tyre_info = analysis['tyres']
+                for tyre in ["FL", "FR", "RL", "RR"]:
+                    if tyre in tyre_info:
+                        info = tyre_info[tyre]
+                        text += f"{tyre}: {info['temp']:.1f}C - {info['action']}<br>"
+                        if info['camber_action']:
+                            text += f"&nbsp;&nbsp;-> {info['camber_action']}<br>"
+                
+                # Steering
+                if analysis['steering']:
+                    text += f"<br><b>STEERING:</b> {analysis['steering']}<br>"
+                
+                self.feedback_text.setText(text)
+            else:
+                self.feedback_text.setText("Waiting for session...")
 
     def toggle_always_on_top(self, state):
         if state == 2: # Checked
@@ -276,6 +366,8 @@ class MainWindow(QMainWindow):
             # --- Update Components ---
             self.engineer.update(data)
             self.recorder.update(data)
+            self.fuel_monitor.update(data)
+            self.wear_monitor.update(data)
             
             # --- Lap Management ---
             car_name = data.mCarName.decode('utf-8', errors='ignore').strip()
@@ -286,34 +378,57 @@ class MainWindow(QMainWindow):
             if 0 <= viewed_idx < data.mNumParticipants:
                 current_lap = data.mParticipantInfo[viewed_idx].mCurrentLap
                 
+                # On first connection, just sync the lap counter, don't trigger save
+                if self.first_update:
+                    self.last_lap = current_lap
+                    self.first_update = False
+                
                 # If lap changed or just started
-                if current_lap > self.last_lap:
+                elif current_lap > self.last_lap:
                     # Try to save last lap time if valid
                     if data.mLastLapTime > 0:
                         session_type = data.mSessionState 
                         self.lap_manager.save_best_lap(car_name, track_name, data.mLastLapTime, str(session_type))
                         
-                        # Capture active recommendation for the log
-                        # We use the engineer's last known analysis or message as a proxy for "Setup Changes"
-                        # Ideally, we'd know if the user actually changed something, but we can't.
-                        # So we log what the engineer *suggested* prior to this lap.
-                        note = "-"
-                        analysis = self.engineer.get_analysis()
-                        if analysis['ready']:
-                             # Summarize briefly
-                             actions = []
-                             for t in analysis['tyres'].values():
-                                 if "Druck" in t['action'] or "Sturz" in t['camber_action']:
-                                     actions.append("Tyres")
-                             if analysis['steering']: actions.append("Steering")
-                             if actions:
-                                 note = "Rec: " + ", ".join(set(actions))
-                        
-                        self.add_lap_to_table(self.last_lap, data.mLastLapTime, note)
-                    
+                        # End of Lap: Check Sector 3
+                        if data.mCurrentSector3Time > 0:
+                             if self.best_sectors[2] == 0 or data.mCurrentSector3Time < self.best_sectors[2]:
+                                 self.best_sectors[2] = data.mCurrentSector3Time
+                        pass
+
                     self.last_lap = current_lap
                     self.update_best_lap_label(car_name, track_name)
             
+            # --- Sector Tracking ---
+            # We need to detect when a sector finishes to capture the time
+            # Current Sector: 1 -> 2 (S1 done), 2 -> 3 (S2 done), 3 -> 1 (S3 done - handled above in lap change)
+            
+            # We need to store the previous sector to detect change
+            if not hasattr(self, 'last_sector_idx'): self.last_sector_idx = data.mParticipantInfo[data.mViewedParticipantIndex].mCurrentSector
+
+            current_sector_idx = data.mParticipantInfo[data.mViewedParticipantIndex].mCurrentSector
+            
+            if current_sector_idx != self.last_sector_idx:
+                # Sector Changed
+                if self.last_sector_idx == 1 and current_sector_idx == 2:
+                    # S1 Finished
+                    if data.mCurrentSector1Time > 0:
+                        if self.best_sectors[0] == 0 or data.mCurrentSector1Time < self.best_sectors[0]:
+                            self.best_sectors[0] = data.mCurrentSector1Time
+                            
+                elif self.last_sector_idx == 2 and current_sector_idx == 3:
+                    # S2 Finished
+                    if data.mCurrentSector2Time > 0:
+                        if self.best_sectors[1] == 0 or data.mCurrentSector2Time < self.best_sectors[1]:
+                            self.best_sectors[1] = data.mCurrentSector2Time
+            
+            self.last_sector_idx = current_sector_idx
+            
+            # Fallback: Also trust AMS2 if it reports a personal best
+            if data.mPersonalFastestSector1Time > 0 and (self.best_sectors[0] == 0 or data.mPersonalFastestSector1Time < self.best_sectors[0]): self.best_sectors[0] = data.mPersonalFastestSector1Time
+            if data.mPersonalFastestSector2Time > 0 and (self.best_sectors[1] == 0 or data.mPersonalFastestSector2Time < self.best_sectors[1]): self.best_sectors[1] = data.mPersonalFastestSector2Time
+            if data.mPersonalFastestSector3Time > 0 and (self.best_sectors[2] == 0 or data.mPersonalFastestSector3Time < self.best_sectors[2]): self.best_sectors[2] = data.mPersonalFastestSector3Time
+
             # --- UI Updates ---
             self.update_session_tab(data)
             
