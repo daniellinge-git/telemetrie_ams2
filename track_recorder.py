@@ -1,5 +1,7 @@
 import math
 
+import math
+
 class TrackRecorder:
     def __init__(self):
         self.track_data = [] # List of (x, z) tuples
@@ -7,6 +9,10 @@ class TrackRecorder:
         self.lap_distance = 0
         self.last_pos = None
         self.tightest_corner = None # (radius, x, z)
+        # v1.1: Brake Point Detection
+        self.brake_points = [] # List of (x, z) where brake > 50%
+        self.corner_speeds = [] # List of (x, z, speed) for corners
+        self.was_braking = False 
         
         # Thresholds
         self.min_dist_update = 2.0 # Meters between points
@@ -17,6 +23,8 @@ class TrackRecorder:
         self.lap_distance = 0
         self.last_pos = None
         self.tightest_corner = None
+        self.brake_points = []
+        self.corner_speeds = []
 
     def update(self, data):
         # Only record if moving, on track, and NOT in pits
@@ -28,6 +36,20 @@ class TrackRecorder:
         x = data.mParticipantInfo[data.mViewedParticipantIndex].mWorldPosition[0]
         z = data.mParticipantInfo[data.mViewedParticipantIndex].mWorldPosition[2]
         speed = data.mSpeed * 3.6 # km/h
+        
+        speed = data.mSpeed * 3.6 # km/h
+        
+        # v1.1: Brake Detection (Start of Braking event)
+        # Check Unfiltered Brake input (0.0 - 1.0)
+        is_braking = data.mUnfilteredBrake > 0.05
+        
+        if is_braking and not self.was_braking:
+            # We just started braking -> Record Point
+            # Only add if moving fast enough (avoid pit limiter brake checks etc)
+            if speed > 50.0:
+                self.brake_points.append((x, z))
+                
+        self.was_braking = is_braking
         
         current_pos = (x, z, speed)
         
@@ -77,3 +99,10 @@ class TrackRecorder:
 
     def get_tightest_corner(self):
         return self.tightest_corner
+        
+    def get_brake_points(self):
+        return self.brake_points
+        
+    def get_corner_speeds(self):
+        return [] # Removed in v1.1
+

@@ -9,23 +9,41 @@ class FuelMonitor:
         if data.mGameState != 2: return # Only track when playing
         
         self.fuel_capacity = data.mFuelCapacity
-        current_fuel = data.mFuelLevel * data.mFuelCapacity # mFuelLevel is 0.0-1.0 usually? Or Liters?
-        # AMS2 mFuelLevel is usually absolute liters in PC2/AMS2 API?
-        # Let's check structs. mFuelLevel is float. mFuelCapacity is float.
-        # Usually mFuelLevel is ratio (0-1) and Capacity is Liters.
-        # BUT in some docs mFuelLevel is Liters.
-        # Let's assume mFuelLevel is Liters for now based on typical usage, 
-        # but if it's <= 1.0 and capacity is > 1.0, it's a ratio.
+        current_fuel = 0.0
         
-        # Safe check:
+        # Improved Fuel Logic (v1.1)
+        # mFuelLevel is typically a ratio (0.0 - 1.0)
+        # mFuelCapacity is typically in Liters
+        
         if data.mFuelCapacity > 0:
-             if data.mFuelLevel <= 1.0 and data.mFuelCapacity > 10.0:
-                 # It's likely a ratio
-                 current_fuel = data.mFuelLevel * data.mFuelCapacity
+             # If capacity is known, we can be smarter
+             # v1.1 Fix: Assume mFuelLevel is LITERS if it's > 1.0 OR if we are just careful.
+             # Actually, AMS2 Shared Memory docs say mFuelLevel is "Fuel level (0..1)". 
+             # BUT users report it acting weirdly. 
+             # Let's try to assume it is Liter if it matches Capacity scale, otherwise Ratio.
+             
+             if data.mFuelLevel > 1.0:
+                  # If > 1.0, it MUST be Liters
+                  current_fuel = data.mFuelLevel
+             elif data.mFuelLevel <= 1.0:
+                  # It COULD be Liters (running dry) or Ratio.
+                  # If Capacity is 100L, 1.0L is very low. 1.0 Ratio is Full.
+                  # Logic: If mFuelValue * Capacity == mFuelValue, then mFuelValue is Liters? No.
+                  
+                  # Safer approach:
+                  # If we believe it is Ratio:
+                  fuel_as_ratio = data.mFuelLevel * data.mFuelCapacity
+                  
+                  # How to distinguish 0.5 Liters from 50% (0.5 Ratio)?
+                  # We can't easily. But 0.5L is basically empty. 
+                  # Most likely it IS Ratio (0.0-1.0).
+                  # The bug reported: "Verbrauch nicht korrekt" might be due to Avg Consumption calc.
+                  
+                  current_fuel = fuel_as_ratio
              else:
-                 # It's likely liters
-                 current_fuel = data.mFuelLevel
+                  current_fuel = data.mFuelLevel
         else:
+             # Fallback if capacity is 0 (shouldn't happen usually)
              current_fuel = data.mFuelLevel
              
         # Lap Change Detection

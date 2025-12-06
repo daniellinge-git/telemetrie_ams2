@@ -38,8 +38,10 @@ Dieses Dokument beschreibt die Anforderungen an ein Telemetrie-Analyse-System f�
 - **Race Engineer (Ingenieur)**:
     - Analyse der Reifentemperaturen und -drücke.
     - Analyse des Lenkverhaltens (Untersteuern/Übersteuern).
-    - **NEU:** Analyse-Trigger basierend auf **Daten-Stabilität**, nicht auf fixer Rundenanzahl.
-    - **NEU:** Fortschrittsanzeige der Analyse in Prozent (0-100%).
+    - **NEU (v1.1):** Analyse-Trigger basierend auf **gefahrenen Kilometern** (statt nur Stabilität/Runden).
+    - **NEU (v1.1):** Mindestdistanz vor erster Analyse: 10 km.
+    - **NEU (v1.1):** Reset der Analyse-Strecke bei Boxenstopp.
+    - **NEU (v1.1):** Vergleichsanalyse nach Boxenstopp: Bewertung von Setup-Änderungen (Positiv/Negativ).
     - **NEU:** Meldung "BOX, Änderung Notwendig!" sobald stabile Daten vorliegen und Handlungsbedarf besteht.
     - **NEU:** Persistenz der Analyse-Ergebnisse auch bei Boxenstopps oder Pausen.
 
@@ -49,11 +51,17 @@ Dieses Dokument beschreibt die Anforderungen an ein Telemetrie-Analyse-System f�
     1. **Session & Setup**:
         - Live-Timing (Aktuelle Runde, Beste Runde, Sektoren).
         - **NEU:** Sektorzeiten farbig markiert (Grün = Schneller/Gleich, Rot = Langsamer als Session-Best).
+        - **NEU (v1.1):** Anzeige der aktuell gefahrenen Kilometer (Analyse-Fortschritt).
+        - **NEU (v1.1):** Indikator für Setup-Änderungseffektivität (Positiv/Negativ) nach Boxenstopp.
+        - **NEU (v1.1):** Unterscheidung der Session-Typen (Training, Quali, Rennen).
+        - **NEU (v1.1):** Deaktivierung von Setup-Empfehlungen im Rennen.
+        - **NEU (v1.1):** Anzeige von Gegner-Informationen (falls verfügbar).
         - Race Engineer Feedback (Text & Warnungen).
     2. **Track Map**:
         - Dynamische Streckenkarte.
         - Farbcodierung nach Geschwindigkeit.
         - Markierung der engsten Kurve (Ausnahme: Boxengasse/Ungültige Runden).
+        - **NEU (v1.1):** Markierung des Bremspunktes vor Kurven.
     3. **Lap Times**:
         - Tabelle aller gefahrenen Runden.
         - Spalten: Runde, Zeit, Sektor 1, **Setup / Notes**.

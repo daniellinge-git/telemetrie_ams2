@@ -41,8 +41,6 @@ class MainWindow(QMainWindow):
         self.first_update = True
 
         # Main Layout
-
-        # Main Layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
@@ -113,7 +111,38 @@ class MainWindow(QMainWindow):
         row2.addWidget(self.lbl_s3)
         timing_layout.addLayout(row2)
         
+        # Row 3: Distance & Feedback (v1.1)
+        row3 = QHBoxLayout()
+        self.lbl_distance = QLabel("Dist: 0.0 km")
+        self.lbl_distance.setStyleSheet("font-size: 14px; color: #aaaaff;")
+        self.lbl_setup_feedback = QLabel("Setup: -")
+        self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold;")
+        row3.addWidget(self.lbl_distance)
+        row3.addWidget(self.lbl_setup_feedback)
+        timing_layout.addLayout(row3)
+        
+        # Row 4: Session Type (v1.1)
+        row4 = QHBoxLayout()
+        self.lbl_session_type = QLabel("Session: -")
+        self.lbl_session_type.setStyleSheet("font-size: 14px; font-weight: bold; color: orange;")
+        self.lbl_handling = QLabel("Balance: -")
+        self.lbl_handling.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
+        row4.addWidget(self.lbl_session_type)
+        row4.addWidget(self.lbl_handling)
+        timing_layout.addLayout(row4)
+        
         layout.addLayout(timing_layout)
+        
+        layout.addWidget(QLabel("")) # Spacer
+        
+        # Opponent Info (v1.1)
+        self.lbl_opponents = QLabel("Opponents (Top 3):")
+        self.lbl_opponents.setStyleSheet("font-weight: bold;")
+        layout.addWidget(self.lbl_opponents)
+        
+        self.opponent_list = QLabel("-")
+        self.opponent_list.setStyleSheet("font-family: monospace;")
+        layout.addWidget(self.opponent_list)
         
         layout.addWidget(QLabel("")) # Spacer
         
@@ -174,13 +203,11 @@ class MainWindow(QMainWindow):
         self.lbl_current_lap.setText(f"Current: {self.format_time(data.mCurrentTime)}")
         
         # Best Lap (Session Best)
-        # mBestLapTime might be 0 if none yet, or use our manager
         best_time = data.mBestLapTime
         if best_time > 0:
             self.lbl_best_lap.setText(f"Best: {self.format_time(best_time)}")
         
         # Sectors
-        # Helper to colorize sector times
         def set_sector_label(label, current, best, prefix):
             if current <= 0:
                 label.setText(f"{prefix}: --.---")
@@ -189,16 +216,12 @@ class MainWindow(QMainWindow):
                 
             text = f"{prefix}: {current:.3f}"
             
-            # If we have a best time to compare against
             if best > 0:
                 if current <= best:
-                    # Faster or equal (Green)
                     label.setStyleSheet("color: #00ff00; font-weight: bold;")
                 else:
-                    # Slower (Red)
                     label.setStyleSheet("color: #ff0000; font-weight: bold;")
             else:
-                # No best time yet, just white
                 label.setStyleSheet("color: white;")
                 
             label.setText(text)
@@ -207,12 +230,64 @@ class MainWindow(QMainWindow):
         set_sector_label(self.lbl_s2, data.mCurrentSector2Time, self.best_sectors[1], "S2")
         set_sector_label(self.lbl_s3, data.mCurrentSector3Time, self.best_sectors[2], "S3")
 
+        # Always get analysis for distance/feedback updates
+        analysis = self.engineer.get_analysis()
+        
+        # Update Distance
+        dist = analysis.get('distance', 0.0)
+        self.lbl_distance.setText(f"Dist: {dist:.1f} km")
+        
+        # Update Feedback
+        feedback = analysis.get('feedback')
+        if feedback == "IMPROVED":
+            self.lbl_setup_feedback.setText("Setup: IMPROVED")
+            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: #00ff00;") # Green
+        elif feedback == "WORSENED":
+            self.lbl_setup_feedback.setText("Setup: WORSENED")
+            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff0000;") # Red
+        elif feedback == "NEUTRAL":
+            self.lbl_setup_feedback.setText("Setup: NEUTRAL")
+            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: #cccccc;") # Grey
+        else:
+            self.lbl_setup_feedback.setText("Setup: -")
+            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
+
+        # v1.1: Session Type Display
+        session_map = {0: "INVALID", 1: "PRACTICE", 2: "TEST", 3: "QUALIFY", 4: "FORMATION", 5: "RACE", 6: "TIME_ATTACK"}
+        sess_str = session_map.get(data.mSessionState, "UNKNOWN")
+        sess_str = session_map.get(data.mSessionState, "UNKNOWN")
+        self.lbl_session_type.setText(f"Session: {sess_str}")
+        
+        # v1.1 Handling Balance
+        handling = analysis.get('handling', 'NEUTRAL')
+        h_val = analysis.get('handling_val', 0.0)
+        h_text = f"Balance: {handling} ({h_val:+.2f})"
+        
+        h_color = "white"
+        if handling == "UNDERSTEER": h_color = "#00bfff" # Blue
+        elif handling == "OVERSTEER": h_color = "#ff4500" # Red
+        
+        self.lbl_handling.setText(h_text)
+        self.lbl_handling.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {h_color};")
+        
+        # v1.1: Opponent Info (Simple Top 3)
+        # We need to iterate participants and sort by position
+        opponents = []
+        for i in range(data.mNumParticipants):
+            p = data.mParticipantInfo[i]
+            if p.mIsActive:
+                opponents.append((p.mRacePosition, p.mName.decode('utf-8', errors='ignore').strip()))
+        
+        opponents.sort(key=lambda x: x[0])
+        opp_text = ""
+        for pos, name in opponents[:3]:
+            opp_text += f"P{pos}: {name}\n"
+        self.opponent_list.setText(opp_text if opp_text else "No Opponents")
+
         # Always check for urgent engineer messages first
         msg = self.engineer.get_message()
         
         if data.mGameState == 3: # Pause
-            analysis = self.engineer.get_analysis()
-            
             # Prio 1: If Engineer wants to Box, show that clearly!
             if "Box" in msg:
                  self.feedback_text.setText(f"<h2 style='color:red'>!!! {msg} !!!</h2><br>Check Setup Recommendations below.")
@@ -253,7 +328,6 @@ class MainWindow(QMainWindow):
                 text += "Target: 75C - 85C<br>"
                 
                 # Get current averages from analyzer history if available, else current temp
-                # We can access the analyzer directly via self.engineer.tyre_analyzer
                 analyzer = self.engineer.tyre_analyzer
                 for i, name in enumerate(analyzer.tyre_names):
                     # Get last recorded temp from history if exists
@@ -269,7 +343,6 @@ class MainWindow(QMainWindow):
                     
                     text += f"{name}: <span style='color:{color}'>{avg_temp:.1f}C</span> (Curr: {current_temp:.0f}C)<br>"
                 
-                self.feedback_text.setText(text)
                 self.feedback_text.setText(text)
             else:
                 self.feedback_text.setText(f"<b>RACE ENGINEER:</b><br>{msg}")
@@ -287,9 +360,6 @@ class MainWindow(QMainWindow):
             
             # Wear
             info_text += "Tyres (Rem. Laps):<br>"
-            # Grid layout for tyres? Just text for now
-            # FL FR
-            # RL RR
             
             def fmt_wear(w):
                 laps = f"{w['remaining_laps']:.1f}" if w['remaining_laps'] < 100 else ">100"
@@ -300,10 +370,6 @@ class MainWindow(QMainWindow):
             
             # Append to existing text
             current_text = self.feedback_text.text()
-            # Avoid duplicating if we update frequently? setText replaces content, so it's fine.
-            # But we need to make sure we don't overwrite the Engineer message if we just set it above.
-            # Actually, setText overwrites. So we should append.
-            
             self.feedback_text.setText(current_text + info_text)
         
         else:
@@ -493,6 +559,18 @@ class MainWindow(QMainWindow):
             self.ax.plot(corner[1], corner[2], 'wo', markersize=8) # White circle background
             self.ax.text(corner[1], corner[2], "!", color='red', fontsize=12, fontweight='bold', ha='center', va='center')
         
+        # v1.1: Draw Brake Points
+        brake_points = self.recorder.get_brake_points()
+        if brake_points:
+             bx = [p[0] for p in brake_points]
+             bz = [p[1] for p in brake_points]
+             self.ax.plot(bx, bz, 'ro', markersize=3, label="Brake")
+
+        # v1.1: Draw Corner Speeds
+        # v1.1: Draw Corner Speeds - REMOVED per requirements
+        # corner_speeds = self.recorder.get_corner_speeds()
+        # if corner_speeds: ...
+
         self.canvas.draw()
 
     def format_time(self, seconds):
