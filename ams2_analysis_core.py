@@ -146,7 +146,8 @@ class AnalysisEngine:
         LOCKUP_THRES = 0.4 # 40% slip
         
         if slip_ratio_fl > LOCKUP_THRES or slip_ratio_fr > LOCKUP_THRES:
-            self.add_event("Front Lockup", "Bremsbalance nach HINTEN", "BRAKING", data)
+            reason = f"Rad blockiert (Schlupf > {LOCKUP_THRES*100:.0f}%). Vorderräder stehen."
+            self.add_event("Vorderräder blockieren", "Bremsbalance nach HINTEN", "BREMSEN", data, reason)
 
         # B. Rear Lockup (Instability)
         rl_speed = abs(data.mTyreRPS[2] * data.mTyreRadius[2])
@@ -156,7 +157,8 @@ class AnalysisEngine:
         slip_ratio_rr = (speed - rr_speed) / max(speed, 0.1)
         
         if slip_ratio_rl > LOCKUP_THRES or slip_ratio_rr > LOCKUP_THRES:
-             self.add_event("Rear Lockup", "Bremsbalance nach VORNE", "BRAKING", data)
+             reason = f"Rad blockiert (Schlupf > {LOCKUP_THRES*100:.0f}%). Hinterräder stehen -> Instabil."
+             self.add_event("Hinterräder blockieren", "Bremsbalance nach VORNE", "BREMSEN", data, reason)
              
     def check_turn_in(self, data):
         # Understeer Entry
@@ -174,12 +176,14 @@ class AnalysisEngine:
         US_THRES = 1.0 # m/s difference
         
         if front_slip > (rear_slip + US_THRES):
-            self.add_event("Understeer Entry", "Stabi (ARB) vorne WEICHER", "TURN_IN", data)
+            reason = f"Vorne viel weniger Grip als Hinten (Diff {front_slip - rear_slip:.1f} m/s)."
+            self.add_event("Untersteuern Eingang", "Stabi (ARB) vorne WEICHER", "EINLENKEN", data, reason)
             
         # Oversteer Entry (Lift-off)
         OS_THRES = 1.0
         if rear_slip > (front_slip + OS_THRES):
-             self.add_event("Oversteer Entry", "Diff-Coast ERHÖHEN (mehr Sperre)", "TURN_IN", data)
+             reason = f"Hinten Traktionsverlust beim Einlenken/Rollen."
+             self.add_event("Übersteuern Eingang", "Diff-Coast ERHÖHEN (mehr Sperre)", "EINLENKEN", data, reason)
 
     def check_exit(self, data):
         # Power Oversteer
@@ -194,18 +198,20 @@ class AnalysisEngine:
         POS_THRES = 1.5 # Needs to be significant
         
         if rear_slip > (front_slip + POS_THRES):
-             self.add_event("Power Oversteer", "Diff-Power REDUZIEREN (weniger Sperre)", "EXIT", data)
+             reason = f"Heck bricht beim Gasgeben aus."
+             self.add_event("Power Übersteuern", "Diff-Power REDUZIEREN (weniger Sperre)", "AUSGANG", data, reason)
              
         # Understeer Exit (Pushing wide)
         if front_slip > (rear_slip + POS_THRES):
-             self.add_event("Understeer Exit", "Diff-Power ERHÖHEN (mehr Sperre)", "EXIT", data)
+             reason = f"Auto schiebt beim Gasgeben über Vorderräder."
+             self.add_event("Untersteuern Ausgang", "Diff-Power ERHÖHEN (mehr Sperre)", "AUSGANG", data, reason)
 
     def check_general(self, data):
         # Bottoming
         # Suspension travel at limit?
         pass
 
-    def add_event(self, name, suggestion, phase, data=None):
+    def add_event(self, name, suggestion, phase, data=None, reason=""):
         # Debounce: Don't spam events.
         # We need a cooldown or "Active" check.
         # Ideally, we log this per Corner.
@@ -224,6 +230,7 @@ class AnalysisEngine:
                 "name": name,
                 "suggestion": suggestion,
                 "phase": phase,
+                "reason": reason,
                 "x": 0.0, 
                 "z": 0.0
             }
@@ -245,7 +252,7 @@ class AnalysisEngine:
         for e in self.events:
             n = e['name']
             if n not in summary:
-                summary[n] = {'count': 0, 'suggestion': e['suggestion']}
+                summary[n] = {'count': 0, 'suggestion': e['suggestion'], 'reason': e.get('reason', '')}
             summary[n]['count'] += 1
             
         return {'summary': summary, 'events': self.events}

@@ -102,15 +102,23 @@ class RaceEngineer:
                 self.driven_distance_stint = 0.0
                 self.setup_feedback = None # Reset feedback for new run
                 
-                self.tyre_analyzer.reset()
-                self.core_engine.reset() # Reset core events
+                try:
+                    self.tyre_analyzer.reset()
+                except Exception as e:
+                    print(f"ERROR resetting TyreAnalyzer: {e}")
+                    
+                try:
+                    self.core_engine.reset() # Reset core events
+                except Exception as e:
+                     print(f"ERROR resetting CoreEngine: {e}")
+                     
                 self.message = "Neuer Run gestartet. Sammle Daten..."
                 self.has_visited_pits = False
             else:
                 if not self.has_visited_pits:
                      pass 
                 else:
-                     self.message = "Bereit für neuen Run..." 
+                     self.message = "Bereit für neuen Run... (Fahre > 10 km/h)" 
             return
 
         # If we are WAITING (e.g. just started app or came from Menu)
@@ -128,7 +136,7 @@ class RaceEngineer:
             # v1.1: Check Session State - If RACE, do NOT analyze for Setup
             # mSessionState: 0=Invalid, 1=Practice, 2=Test, 3=Quali, 4=Formation, 5=Race, 6=TimeAttack
             if data.mSessionState == 5: # RACE
-                 self.message = f"RACE - {self.driven_distance_stint:.1f} km - pHASE: {self.core_engine.phase_detector.current_phase}"
+                 self.message = f"RENNEN - {self.driven_distance_stint:.1f} km - PHASE: {self.core_engine.phase_detector.current_phase}"
                  return
 
             # v1.1: Check Distance Threshold
@@ -230,9 +238,9 @@ class RaceEngineer:
         curr_probs = count_problems(current_analysis)
         
         if curr_probs < prev_probs:
-            self.setup_feedback = "IMPROVED"
+            self.setup_feedback = "VERBESSERT"
         elif curr_probs > prev_probs:
-            self.setup_feedback = "WORSENED"
+            self.setup_feedback = "VERSCHLECHTERT"
         else:
             self.setup_feedback = "NEUTRAL"
             

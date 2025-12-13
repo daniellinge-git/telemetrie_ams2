@@ -60,11 +60,11 @@ class MainWindow(QMainWindow):
         
         # --- Header ---
         header = QHBoxLayout()
-        self.lbl_status = QLabel("WAITING...")
+        self.lbl_status = QLabel("WARTE...")
         self.lbl_status.setStyleSheet("font-weight: bold; color: yellow;")
         header.addWidget(self.lbl_status)
         
-        self.chk_ontop = QCheckBox("Always on Top")
+        self.chk_ontop = QCheckBox("Immer im Vordergrund")
         self.chk_ontop.setChecked(True)
         self.chk_ontop.stateChanged.connect(self.toggle_always_on_top)
         header.addWidget(self.chk_ontop)
@@ -83,12 +83,12 @@ class MainWindow(QMainWindow):
         # Tab 2: Setup Engineer
         self.tab_setup = QWidget()
         self.setup_setup_tab()
-        self.tabs.addTab(self.tab_setup, "Setup Engineer")
+        self.tabs.addTab(self.tab_setup, "Setup Ingenieur")
         
         # Tab 3: Track & Data
         self.tab_track = QWidget()
         self.setup_track_tab()
-        self.tabs.addTab(self.tab_track, "Track Map")
+        self.tabs.addTab(self.tab_track, "Streckenkarte")
 
     def setup_live_tab(self):
         layout = QVBoxLayout(self.tab_live)
@@ -103,10 +103,10 @@ class MainWindow(QMainWindow):
         self.lbl_delta.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_delta.setStyleSheet("background-color: #333; color: white; padding: 10px; border-radius: 5px;")
         
-        self.lbl_current_lap = QLabel("Current: --:--.---")
+        self.lbl_current_lap = QLabel("Aktuell: --:--.---")
         self.lbl_current_lap.setFont(QFont("Arial", 20))
         
-        self.lbl_best_lap = QLabel("Best: --:--.---")
+        self.lbl_best_lap = QLabel("Beste: --:--.---")
         self.lbl_best_lap.setFont(QFont("Arial", 20))
         self.lbl_best_lap.setStyleSheet("color: #00ff00;")
         
@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(grid)
         
         # 2. Critical Message Banner
-        self.lbl_message = QLabel("Awaiting Data...")
+        self.lbl_message = QLabel("Warte auf Daten...")
         self.lbl_message.setFont(QFont("Arial", 16, QFont.Weight.Bold))
         self.lbl_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_message.setStyleSheet("background-color: #222; color: #aaa; padding: 10px; margin-top: 10px;")
@@ -157,7 +157,7 @@ class MainWindow(QMainWindow):
         
         # 3. Session Info
         info_layout = QHBoxLayout()
-        self.lbl_dist = QLabel("Dist: 0.0 km")
+        self.lbl_dist = QLabel("Distanz: 0.0 km")
         self.lbl_phase = QLabel("Phase: -")
         self.lbl_handling = QLabel("Balance: -")
         
@@ -176,7 +176,7 @@ class MainWindow(QMainWindow):
         # Left: Problem List
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.addWidget(QLabel("Detected Problems:"))
+        left_layout.addWidget(QLabel("Erkannte Probleme:"))
         self.problem_list = QListWidget()
         self.problem_list.currentItemChanged.connect(self.on_problem_selected)
         left_layout.addWidget(self.problem_list)
@@ -184,15 +184,15 @@ class MainWindow(QMainWindow):
         # Right: Solution Wizard
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.addWidget(QLabel("Setup Advice:"))
-        self.txt_advice = QLabel("Select a problem to see advice.")
+        right_layout.addWidget(QLabel("Setup Empfehlung:"))
+        self.txt_advice = QLabel("Wähle ein Problem um Details zu sehen.")
         self.txt_advice.setWordWrap(True)
-        self.txt_advice.setStyleSheet("font-size: 14px; background-color: #2a2a2a; padding: 10px; border-radius: 5px;")
+        self.txt_advice.setStyleSheet("font-size: 14px; background-color: #2a2a2a; color: white; padding: 10px; border-radius: 5px;")
         self.txt_advice.setAlignment(Qt.AlignmentFlag.AlignTop)
         right_layout.addWidget(self.txt_advice)
         
         # Feedback Section
-        self.lbl_feedback = QLabel("Stint Comparison: NEUTRAL")
+        self.lbl_feedback = QLabel("Stint Vergleich: NEUTRAL")
         self.lbl_feedback.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 20px;")
         right_layout.addWidget(self.lbl_feedback)
         
@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
                 self.connected = True
                 # self.lbl_status.setText("CONNECTED") # Overwritten below
             else:
-                self.lbl_status.setText("CONNECTING...")
+                self.lbl_status.setText("VERBINDE...")
                 return
 
         data = self.reader.read()
@@ -240,9 +240,13 @@ class MainWindow(QMainWindow):
         
         self.lbl_status.setText(f"CON | GS:{gs} | SS:{ss} | T:{raw_t:.1f} | Time:{raw_time:.1f}")
         
+        # Debug FL Temp
+        if self.map_update_counter % 10 == 0: # reduce spam
+             print(f"DEBUG: FL Raw Temp: {raw_t}")
+        
         # v2.0: Help Prompt if data is zeros
         if data.mGameState == 0 and data.mSessionState == 0 and raw_time == 0.0:
-            self.lbl_message.setText("No Data? Enable 'Shared Memory' in AMS2 Options -> System -> Project CARS 2")
+            self.lbl_message.setText("Keine Daten? 'Shared Memory' in AMS2 Optionen aktivieren -> System -> Project CARS 2")
             self.lbl_message.setStyleSheet("background-color: purple; color: white; font-size: 18px; font-weight: bold;")
             return # Skip other updates to avoid crashes on zero data
         
@@ -273,9 +277,50 @@ class MainWindow(QMainWindow):
     def update_live_tab(self, data):
         try:
             # Times
-            self.lbl_current_lap.setText(f"Current: {self.format_time(data.mCurrentTime)}")
+            self.lbl_current_lap.setText(f"Aktuell: {self.format_time(data.mCurrentTime)}")
             if data.mBestLapTime > 0:
-                self.lbl_best_lap.setText(f"Best: {self.format_time(data.mBestLapTime)}")
+                self.lbl_best_lap.setText(f"Beste: {self.format_time(data.mBestLapTime)}")
+                
+            # v2.1: Lap Feedback / Last Lap Analysis
+            # Check for new lap
+            current_lap = 0
+            if data.mViewedParticipantIndex < 64:
+                 current_lap = data.mParticipantInfo[data.mViewedParticipantIndex].mCurrentLap
+            
+            if current_lap > self.last_lap and self.last_lap != -1:
+                # New Lap Started!
+                last_time = data.mLastLapTime
+                best_time = data.mBestLapTime
+                
+                # If we just set a new best, then last_time == best_time (approx)
+                # Compare with PREVIOUS best? Hard to track without history.
+                # Logic: If last_time <= best_time (with small margin), it's a PB.
+                
+                diff = last_time - best_time
+                
+                msg = ""
+                if diff <= 0.05 and best_time > 0: # New Best (allow float jitter)
+                    msg = f"Runde: {self.format_time(last_time)} (NEUE BESTZEIT!)"
+                    self.lbl_message.setStyleSheet("background-color: green; color: white; font-weight: bold;")
+                elif best_time > 0:
+                     if diff < 1.0:
+                         msg = f"Runde: {self.format_time(last_time)} (+{diff:.2f}s - Gut!)"
+                         self.lbl_message.setStyleSheet("background-color: #333; color: green; font-weight: bold;")
+                     else:
+                         msg = f"Runde: {self.format_time(last_time)} (+{diff:.2f}s)"
+                         self.lbl_message.setStyleSheet("background-color: #333; color: orange;")
+                else:
+                    msg = f"Runde: {self.format_time(last_time)}"
+                    
+                self.lbl_message.setText(msg)
+                # Keep message for 10s? We rely on it not being overwritten quickly.
+                # Other updates might overwrite it (e.g. status).
+                # Force overwrite protection or separate label? 
+                # For now, let's just set it. The 'engineer.get_message()' below might overwrite it 
+                # if there is an active engineer message.
+                # We can inject it into engineer message queue if we had one.
+                
+            self.last_lap = current_lap
                 
             # Delta (Assume we can calculate or use existing?)
             # For prototype, we don't have perfect delta without a reference lap system.
@@ -314,20 +359,34 @@ class MainWindow(QMainWindow):
                     labels[i].setText(f"{key}\n{temp:.0f}C")
                     labels[i].setStyleSheet(f"background-color: #444; border: 2px solid {hex_col}; color: {hex_col}; font-weight: bold;")
                 else:
-                    labels[i].setText(f"{key}\nNO DATA")
+                    labels[i].setText(f"{key}\nKEINE DATEN")
 
             # Message - Priority to Engineer
-            msg = self.engineer.get_message()
-            if "BOX" in msg:
-                self.lbl_message.setText(msg)
+            # Message - Priority to Engineer, BUT allow Lap Feedback to persist if Engineer is "Scanning..."
+            # Strategy: If engineer has "Important" message (BOX), overwrite.
+            # If engineer has generic message ("Analyzing..."), ONLY overwrite if we haven't just finished a lap (msg timer?).
+            # Simple hack: Prefixed messages.
+            
+            eng_msg = self.engineer.get_message()
+            current_msg = self.lbl_message.text()
+            
+            # If current message is a "Result" (starts with "Runde:"), keep it unless Engineer screams BOX
+            is_lap_result = current_msg.startswith("Runde:")
+            
+            if "BOX" in eng_msg:
+                self.lbl_message.setText(eng_msg)
                 self.lbl_message.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 24px;")
-            else:
-                self.lbl_message.setText(msg)
-                self.lbl_message.setStyleSheet("background-color: #222; color: #aaa;")
+            elif not is_lap_result or (is_lap_result and "BOX" in eng_msg): # Logic fix
+                 # Show engineer status if we are not showing a lap result
+                 # Or if engineer status is interesting?
+                 # Let's show Engineer status only if NOT lap result.
+                 if not is_lap_result:
+                     self.lbl_message.setText(eng_msg)
+                     self.lbl_message.setStyleSheet("background-color: #222; color: #aaa;")
                 
             # Info
             dist = analysis.get('distance', 0.0)
-            self.lbl_dist.setText(f"Dist: {dist:.1f} km")
+            self.lbl_dist.setText(f"Distanz: {dist:.1f} km")
             
             # Phase (Debug)
             phase = self.engineer.core_engine.phase_detector.current_phase
@@ -364,34 +423,77 @@ class MainWindow(QMainWindow):
         self.problem_list.clear() # Brute force for now
         
         # 1. Tyres
+        # 1. Tyres
         for t_name, t_info in analysis['tyres'].items():
-            if "OK" not in t_info['action']:
-                item = QListWidgetItem(f"Tyre {t_name}: {t_info['status']}")
-                item.setData(Qt.ItemDataRole.UserRole, f"{t_info['action']}\n{t_info['details']}")
-                self.problem_list.addItem(item)
-            if "OK" not in t_info['camber_action']:
-                item = QListWidgetItem(f"Camber {t_name}: Adjust")
-                item.setData(Qt.ItemDataRole.UserRole, t_info['camber_action'])
-                self.problem_list.addItem(item)
+            # Status Item
+            status_text = f"Tyre {t_name}: {t_info['status']}"
+            item = QListWidgetItem(status_text)
+            
+            is_ok = "OK" in t_info['action']
+            if is_ok:
+                item.setForeground(Qt.GlobalColor.green)
+                # Ensure we have reason for OK items too
+                reason = t_info.get('reason', 'Optimal.')
+                item.setData(Qt.ItemDataRole.UserRole, f"{t_info['action']}\n{t_info['details']}|||{reason}")
+            else:
+                item.setForeground(Qt.GlobalColor.red)
+                item.setData(Qt.ItemDataRole.UserRole, f"{t_info['action']}\n{t_info['details']}|||{t_info['reason']}")
+            
+            self.problem_list.addItem(item)
+
+            # Camber Item
+            camber_ok = "OK" in t_info['camber_action']
+            item_c = QListWidgetItem(f"Camber {t_name}: {t_info['camber_action'].split(' ')[0] if camber_ok else 'Adjust'}")
+            
+            if camber_ok:
+                item_c.setForeground(Qt.GlobalColor.green)
+                 # Ensure we have reason for OK items too
+                reason = t_info.get('camber_reason', 'Optimal.')
+                item_c.setData(Qt.ItemDataRole.UserRole, f"{t_info['camber_action']}|||{reason}")
+            else:
+                item_c.setForeground(Qt.GlobalColor.red)
+                item_c.setText(f"Camber {t_name}: Adjust") # Reset text to generic if bad
+                item_c.setData(Qt.ItemDataRole.UserRole, f"{t_info['camber_action']}|||{t_info['camber_reason']}")
+            
+            self.problem_list.addItem(item_c)
                 
         # 2. Core Events
         for name, info in summary.items():
             count = info['count']
             item = QListWidgetItem(f"{name} ({count}x)")
-            item.setData(Qt.ItemDataRole.UserRole, info['suggestion'])
+            item.setData(Qt.ItemDataRole.UserRole, f"{info['suggestion']}|||{info.get('reason', '')}")
             self.problem_list.addItem(item)
             
         # Feedback Label
         fb = analysis['feedback']
         if fb:
-            self.lbl_feedback.setText(f"Stint Comparison: {fb}")
+            self.lbl_feedback.setText(f"Stint Vergleich: {fb}")
         else:
-            self.lbl_feedback.setText("Stint Comparison: Ref Gathering...")
+            self.lbl_feedback.setText("Stint Vergleich: Sammle Ref-Daten...")
 
     def on_problem_selected(self, current, previous):
         if not current: return
-        advice = current.data(Qt.ItemDataRole.UserRole)
-        self.txt_advice.setText(advice)
+        data = current.data(Qt.ItemDataRole.UserRole)
+        
+        # New Format: Tuple/List or String?
+        # Let's assume the backend might send a dict or string.
+        # But for list widget item, we usually store simple data.
+        # If it's a string, just show it.
+        # If we update backend to return "Advice|Reason", we can split.
+        
+        # Let's handle string with possible delimiter
+        text = str(data)
+        
+        # Check if we have a delimiter (e.g. "|||") for Reason
+        if "|||" in text:
+            parts = text.split("|||")
+            advice = parts[0]
+            reason = parts[1] if len(parts) > 1 else ""
+            
+            full_text = f"<b>EMPFEHLUNG:</b><br>{advice}<br><br><b><i>GRUND:</i></b><br><i>{reason}</i>"
+            self.txt_advice.setText(full_text)
+        else:
+            self.txt_advice.setText(text)
 
     def update_track_tab(self):
         self.map_update_counter += 1

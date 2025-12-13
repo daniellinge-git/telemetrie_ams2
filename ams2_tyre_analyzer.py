@@ -89,7 +89,19 @@ class TyreAnalyzer:
                 
             self._check_stability(i)
             
-    # ... (omitted) ...
+    def _check_stability(self, i):
+        if not self.history[i]:
+            self.is_stable[i] = False
+            return
+
+        temps = [h['avg'] for h in self.history[i]]
+        t_min = min(temps)
+        t_max = max(temps)
+        
+        if (t_max - t_min) < self.stability_threshold:
+            self.is_stable[i] = True
+        else:
+            self.is_stable[i] = False
 
     def get_analysis(self):
         # Return analysis regardless of stability, caller decides when to show it
@@ -101,9 +113,11 @@ class TyreAnalyzer:
             # Defaults if no history
             status = "Waiting..."
             action = "-"
+            reason = ""
             color = "white" # Neutral
             details = ""
             camber_action = "-"
+            camber_reason = ""
             temp_inner = 0.0
             temp_outer = 0.0
             
@@ -118,15 +132,18 @@ class TyreAnalyzer:
                 # --- Pressure Analysis ---
                 status = "OK"
                 action = "Druck OK"
+                reason = "Temperatur im Zielbereich"
                 color = "green"
                 
                 if avg_t < self.target_min:
                     status = "Zu KALT"
                     action = "Druck VERRINGERN (-)"
+                    reason = f"Temp ({avg_t:.1f}°C) zu niedrig (< {self.target_min}°C). Weniger Druck erhöht die Walkarbeit & Temperatur."
                     color = "blue"
                 elif avg_t > self.target_max:
                     status = "Zu HEISS"
                     action = "Druck ERHÖHEN (+)"
+                    reason = f"Temp ({avg_t:.1f}°C) zu hoch (> {self.target_max}°C). Mehr Druck verringert die Walkarbeit."
                     color = "red"
                 
                 # Check spread (Center vs Edges)
@@ -154,34 +171,50 @@ class TyreAnalyzer:
                 delta = temp_inner - temp_outer
                 
                 camber_action = ""
+                camber_reason = ""
                 
                 if is_front:
                     target_delta = 7.0
                     tolerance = 1.5
                     if delta < (target_delta - tolerance):
                         camber_action = "Sturz VERRINGERN (negativer)" 
+                        camber_reason = f"Delta Innen-Außen ({delta:.1f}°C) zu klein (Ziel ~{target_delta}°C). Reifen liegt zu flach auf."
                     elif delta > (target_delta + tolerance):
                         camber_action = "Sturz ERHÖHEN (positiver)"
+                        camber_reason = f"Delta Innen-Außen ({delta:.1f}°C) zu groß (Ziel ~{target_delta}°C). Reifen steht zu steil."
                 else:
                     target_delta_min = 3.0
                     target_delta_max = 5.0
                     if delta < target_delta_min:
                         camber_action = "Sturz VERRINGERN (negativer)"
+                        camber_reason = f"Delta Innen-Außen ({delta:.1f}°C) < {target_delta_min}°C. Zu wenig Sturz für Hinterachse."
                     elif delta > target_delta_max:
                         camber_action = "Sturz ERHÖHEN (positiver)"
+                        camber_reason = f"Delta Innen-Außen ({delta:.1f}°C) > {target_delta_max}°C. Zu viel Sturz für Hinterachse."
                 
                 if not camber_action:
                     camber_action = "Sturz OK"
+                    camber_reason = "Sturz-Temperaturverteilung optimal."
 
             results[self.tyre_names[i]] = {
                 'temp': avg_t,
                 'status': status,
                 'action': action,
+                'reason': reason,
                 'details': details,
                 'camber_action': camber_action,
+                'camber_reason': camber_reason,
                 'temp_inner': temp_inner,
                 'temp_outer': temp_outer,
                 'color': color
             }
             
         return results
+
+    def reset(self):
+        self.history = [[], [], [], []]
+        self.is_stable = [False] * 4
+        self.last_sample_internal_time = -1.0
+        self.current_temps = [0.0, 0.0, 0.0, 0.0]
+        # Do NOT reset targets or internal_time (monotonic)
+        print("DEBUG: TyreAnalyzer RESET executed.")
