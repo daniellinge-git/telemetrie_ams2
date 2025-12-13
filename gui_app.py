@@ -1,10 +1,11 @@
 import sys
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QTabWidget, QPushButton, QCheckBox)
+                             QHBoxLayout, QLabel, QTabWidget, QPushButton, QCheckBox,
+                             QListWidget, QListWidgetItem, QFrame, QSplitter)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor, QPalette
 
-# Placeholder for Matplotlib
+# Matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
@@ -20,8 +21,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("AMS2 Telemetry Engineer")
-        self.setGeometry(100, 100, 800, 600)
+        self.setWindowTitle("AMS2 Telemetry Engineer v2.0")
+        self.setGeometry(100, 100, 1000, 700)
         
         # Window Flags: Always on Top
         self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint)
@@ -37,540 +38,403 @@ class MainWindow(QMainWindow):
         
         # State tracking
         self.last_lap = -1
-        self.best_sectors = [0.0, 0.0, 0.0] # S1, S2, S3
+        self.best_sectors = [0.0, 0.0, 0.0]
         self.first_update = True
+        self.map_update_counter = 0
 
-        # Main Layout
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        self.layout = QVBoxLayout(self.central_widget)
-        
-        # Header / Status Bar
-        self.header_layout = QHBoxLayout()
-        self.status_label = QLabel("GAME STATE: WAITING...")
-        self.status_label.setStyleSheet("font-weight: bold; color: yellow; font-size: 14px;")
-        self.header_layout.addWidget(self.status_label)
-        
-        self.always_on_top_cb = QCheckBox("Always on Top")
-        self.always_on_top_cb.setChecked(True)
-        self.always_on_top_cb.stateChanged.connect(self.toggle_always_on_top)
-        self.header_layout.addWidget(self.always_on_top_cb)
-        
-        self.layout.addLayout(self.header_layout)
-        
-        # Tabs
-        self.tabs = QTabWidget()
-        self.layout.addWidget(self.tabs)
-        
-        # Tab 1: Session / Engineer
-        self.tab_session = QWidget()
-        self.setup_session_tab()
-        self.tabs.addTab(self.tab_session, "Session & Setup")
-        
-        # Tab 2: Track Map
-        self.tab_track = QWidget()
-        self.setup_track_tab()
-        self.tabs.addTab(self.tab_track, "Track Map")
-        
-        # Tab 3: Laps
-        self.tab_laps = QWidget()
-        self.setup_laps_tab()
-        self.tabs.addTab(self.tab_laps, "Lap Times")
-        
         # Styling
         self.apply_dark_theme()
+
+        # UI Layout
+        self.setup_ui()
         
         # Timer for polling
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_loop)
         self.timer.start(100) # 10Hz
 
-    def setup_session_tab(self):
-        layout = QVBoxLayout(self.tab_session)
+    def setup_ui(self):
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.layout = QVBoxLayout(self.central_widget)
         
-        # Timing Grid
-        timing_layout = QVBoxLayout()
+        # --- Header ---
+        header = QHBoxLayout()
+        self.lbl_status = QLabel("WAITING...")
+        self.lbl_status.setStyleSheet("font-weight: bold; color: yellow;")
+        header.addWidget(self.lbl_status)
         
-        # Row 1: Current & Best
-        row1 = QHBoxLayout()
+        self.chk_ontop = QCheckBox("Always on Top")
+        self.chk_ontop.setChecked(True)
+        self.chk_ontop.stateChanged.connect(self.toggle_always_on_top)
+        header.addWidget(self.chk_ontop)
+        
+        self.layout.addLayout(header)
+        
+        # --- Tabs ---
+        self.tabs = QTabWidget()
+        self.layout.addWidget(self.tabs)
+        
+        # Tab 1: Live Dashboard
+        self.tab_live = QWidget()
+        self.setup_live_tab()
+        self.tabs.addTab(self.tab_live, "Live Dashboard")
+        
+        # Tab 2: Setup Engineer
+        self.tab_setup = QWidget()
+        self.setup_setup_tab()
+        self.tabs.addTab(self.tab_setup, "Setup Engineer")
+        
+        # Tab 3: Track & Data
+        self.tab_track = QWidget()
+        self.setup_track_tab()
+        self.tabs.addTab(self.tab_track, "Track Map")
+
+    def setup_live_tab(self):
+        layout = QVBoxLayout(self.tab_live)
+        
+        # 1. Big Info Grid
+        grid = QHBoxLayout()
+        
+        # Left: Times
+        times_layout = QVBoxLayout()
+        self.lbl_delta = QLabel("-0.000")
+        self.lbl_delta.setFont(QFont("Arial", 40, QFont.Weight.Bold))
+        self.lbl_delta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_delta.setStyleSheet("background-color: #333; color: white; padding: 10px; border-radius: 5px;")
+        
         self.lbl_current_lap = QLabel("Current: --:--.---")
-        self.lbl_current_lap.setStyleSheet("font-size: 18px; font-weight: bold;")
+        self.lbl_current_lap.setFont(QFont("Arial", 20))
+        
         self.lbl_best_lap = QLabel("Best: --:--.---")
-        self.lbl_best_lap.setStyleSheet("font-size: 18px; font-weight: bold; color: #00ff00;")
-        row1.addWidget(self.lbl_current_lap)
-        row1.addWidget(self.lbl_best_lap)
-        timing_layout.addLayout(row1)
+        self.lbl_best_lap.setFont(QFont("Arial", 20))
+        self.lbl_best_lap.setStyleSheet("color: #00ff00;")
         
-        # Row 2: Sectors
-        row2 = QHBoxLayout()
-        self.lbl_s1 = QLabel("S1: --.---")
-        self.lbl_s2 = QLabel("S2: --.---")
-        self.lbl_s3 = QLabel("S3: --.---")
-        row2.addWidget(self.lbl_s1)
-        row2.addWidget(self.lbl_s2)
-        row2.addWidget(self.lbl_s3)
-        timing_layout.addLayout(row2)
+        times_layout.addWidget(self.lbl_delta)
+        times_layout.addWidget(self.lbl_current_lap)
+        times_layout.addWidget(self.lbl_best_lap)
+        grid.addLayout(times_layout)
         
-        # Row 3: Distance & Feedback (v1.1)
-        row3 = QHBoxLayout()
-        self.lbl_distance = QLabel("Dist: 0.0 km")
-        self.lbl_distance.setStyleSheet("font-size: 14px; color: #aaaaff;")
-        self.lbl_setup_feedback = QLabel("Setup: -")
-        self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold;")
-        row3.addWidget(self.lbl_distance)
-        row3.addWidget(self.lbl_setup_feedback)
-        timing_layout.addLayout(row3)
+        # Right: Tires & Status
+        status_layout = QVBoxLayout()
         
-        # Row 4: Session Type (v1.1)
-        row4 = QHBoxLayout()
-        self.lbl_session_type = QLabel("Session: -")
-        self.lbl_session_type.setStyleSheet("font-size: 14px; font-weight: bold; color: orange;")
+        # Tyres Grid
+        tyres_grid = QHBoxLayout()
+        # Fronts
+        self.lbl_fl = QLabel("FL\n--C")
+        self.lbl_fr = QLabel("FR\n--C")
+        # Rears
+        self.lbl_rl = QLabel("RL\n--C")
+        self.lbl_rr = QLabel("RR\n--C")
+        
+        for lbl in [self.lbl_fl, self.lbl_fr, self.lbl_rl, self.lbl_rr]:
+            lbl.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("background-color: #444; border: 1px solid #666; padding: 5px;")
+            
+        t_col1 = QVBoxLayout()
+        t_col1.addWidget(self.lbl_fl)
+        t_col1.addWidget(self.lbl_rl)
+        
+        t_col2 = QVBoxLayout()
+        t_col2.addWidget(self.lbl_fr)
+        t_col2.addWidget(self.lbl_rr)
+        
+        tyres_grid.addLayout(t_col1)
+        tyres_grid.addLayout(t_col2)
+        
+        status_layout.addLayout(tyres_grid)
+        grid.addLayout(status_layout)
+        
+        layout.addLayout(grid)
+        
+        # 2. Critical Message Banner
+        self.lbl_message = QLabel("Awaiting Data...")
+        self.lbl_message.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        self.lbl_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_message.setStyleSheet("background-color: #222; color: #aaa; padding: 10px; margin-top: 10px;")
+        layout.addWidget(self.lbl_message)
+        
+        # 3. Session Info
+        info_layout = QHBoxLayout()
+        self.lbl_dist = QLabel("Dist: 0.0 km")
+        self.lbl_phase = QLabel("Phase: -")
         self.lbl_handling = QLabel("Balance: -")
-        self.lbl_handling.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
-        row4.addWidget(self.lbl_session_type)
-        row4.addWidget(self.lbl_handling)
-        timing_layout.addLayout(row4)
         
-        layout.addLayout(timing_layout)
-        
-        layout.addWidget(QLabel("")) # Spacer
-        
-        # Opponent Info (v1.1)
-        self.lbl_opponents = QLabel("Opponents (Top 3):")
-        self.lbl_opponents.setStyleSheet("font-weight: bold;")
-        layout.addWidget(self.lbl_opponents)
-        
-        self.opponent_list = QLabel("-")
-        self.opponent_list.setStyleSheet("font-family: monospace;")
-        layout.addWidget(self.opponent_list)
-        
-        layout.addWidget(QLabel("")) # Spacer
-        
-        self.engineer_label = QLabel("Race Engineer Feedback")
-        self.engineer_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #00ff00;")
-        layout.addWidget(self.engineer_label)
-        
-        self.feedback_text = QLabel("Waiting for data...")
-        self.feedback_text.setWordWrap(True)
-        self.feedback_text.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.feedback_text.setStyleSheet("font-size: 14px;")
-        layout.addWidget(self.feedback_text)
+        info_layout.addWidget(self.lbl_dist)
+        info_layout.addWidget(self.lbl_phase)
+        info_layout.addWidget(self.lbl_handling)
+        layout.addLayout(info_layout)
         
         layout.addStretch()
+
+    def setup_setup_tab(self):
+        layout = QVBoxLayout(self.tab_setup)
+        
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Left: Problem List
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.addWidget(QLabel("Detected Problems:"))
+        self.problem_list = QListWidget()
+        self.problem_list.currentItemChanged.connect(self.on_problem_selected)
+        left_layout.addWidget(self.problem_list)
+        
+        # Right: Solution Wizard
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.addWidget(QLabel("Setup Advice:"))
+        self.txt_advice = QLabel("Select a problem to see advice.")
+        self.txt_advice.setWordWrap(True)
+        self.txt_advice.setStyleSheet("font-size: 14px; background-color: #2a2a2a; padding: 10px; border-radius: 5px;")
+        self.txt_advice.setAlignment(Qt.AlignmentFlag.AlignTop)
+        right_layout.addWidget(self.txt_advice)
+        
+        # Feedback Section
+        self.lbl_feedback = QLabel("Stint Comparison: NEUTRAL")
+        self.lbl_feedback.setStyleSheet("font-size: 16px; font-weight: bold; margin-top: 20px;")
+        right_layout.addWidget(self.lbl_feedback)
+        
+        right_layout.addStretch()
+        
+        splitter.addWidget(left_widget)
+        splitter.addWidget(right_widget)
+        splitter.setSizes([300, 500])
+        
+        layout.addWidget(splitter)
 
     def setup_track_tab(self):
         layout = QVBoxLayout(self.tab_track)
         
-        # Matplotlib Figure
         self.figure = Figure(figsize=(5, 4), dpi=100)
-        self.figure.patch.set_facecolor('#2b2b2b') # Match dark theme
+        self.figure.patch.set_facecolor('#2b2b2b')
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
         self.ax.set_facecolor('#2b2b2b')
-        self.ax.tick_params(colors='white')
-        self.ax.spines['bottom'].set_color('white')
-        self.ax.spines['top'].set_color('white')
-        self.ax.spines['left'].set_color('white')
-        self.ax.spines['right'].set_color('white')
+        self.ax.axis('off')
         
         layout.addWidget(self.canvas)
-        
-        self.track_status_label = QLabel("Drive a lap to record track map...")
-        layout.addWidget(self.track_status_label)
-
-    def setup_laps_tab(self):
-        layout = QVBoxLayout(self.tab_laps)
-        
-        self.laps_label = QLabel("Session Laps")
-        self.laps_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(self.laps_label)
-        
-        # Table for laps
-        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
-        self.laps_table = QTableWidget()
-        self.laps_table.setColumnCount(4) # Added Setup Column
-        self.laps_table.setHorizontalHeaderLabels(["Lap", "Time", "Sector 1", "Setup / Notes"]) 
-        self.laps_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.laps_table)
-        
-        # Best Lap Label
-        self.best_lap_label = QLabel("Best Lap: --:--.---")
-        self.best_lap_label.setStyleSheet("font-weight: bold; color: #00ff00;")
-        layout.addWidget(self.best_lap_label)
-
-    def update_session_tab(self, data):
-        # Update Timing
-        self.lbl_current_lap.setText(f"Current: {self.format_time(data.mCurrentTime)}")
-        
-        # Best Lap (Session Best)
-        best_time = data.mBestLapTime
-        if best_time > 0:
-            self.lbl_best_lap.setText(f"Best: {self.format_time(best_time)}")
-        
-        # Sectors
-        def set_sector_label(label, current, best, prefix):
-            if current <= 0:
-                label.setText(f"{prefix}: --.---")
-                label.setStyleSheet("color: white;")
-                return
-                
-            text = f"{prefix}: {current:.3f}"
-            
-            if best > 0:
-                if current <= best:
-                    label.setStyleSheet("color: #00ff00; font-weight: bold;")
-                else:
-                    label.setStyleSheet("color: #ff0000; font-weight: bold;")
-            else:
-                label.setStyleSheet("color: white;")
-                
-            label.setText(text)
-
-        set_sector_label(self.lbl_s1, data.mCurrentSector1Time, self.best_sectors[0], "S1")
-        set_sector_label(self.lbl_s2, data.mCurrentSector2Time, self.best_sectors[1], "S2")
-        set_sector_label(self.lbl_s3, data.mCurrentSector3Time, self.best_sectors[2], "S3")
-
-        # Always get analysis for distance/feedback updates
-        analysis = self.engineer.get_analysis()
-        
-        # Update Distance
-        dist = analysis.get('distance', 0.0)
-        self.lbl_distance.setText(f"Dist: {dist:.1f} km")
-        
-        # Update Feedback
-        feedback = analysis.get('feedback')
-        if feedback == "IMPROVED":
-            self.lbl_setup_feedback.setText("Setup: IMPROVED")
-            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: #00ff00;") # Green
-        elif feedback == "WORSENED":
-            self.lbl_setup_feedback.setText("Setup: WORSENED")
-            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff0000;") # Red
-        elif feedback == "NEUTRAL":
-            self.lbl_setup_feedback.setText("Setup: NEUTRAL")
-            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: #cccccc;") # Grey
-        else:
-            self.lbl_setup_feedback.setText("Setup: -")
-            self.lbl_setup_feedback.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
-
-        # v1.1: Session Type Display
-        session_map = {0: "INVALID", 1: "PRACTICE", 2: "TEST", 3: "QUALIFY", 4: "FORMATION", 5: "RACE", 6: "TIME_ATTACK"}
-        sess_str = session_map.get(data.mSessionState, "UNKNOWN")
-        sess_str = session_map.get(data.mSessionState, "UNKNOWN")
-        self.lbl_session_type.setText(f"Session: {sess_str}")
-        
-        # v1.1 Handling Balance
-        handling = analysis.get('handling', 'NEUTRAL')
-        h_val = analysis.get('handling_val', 0.0)
-        h_text = f"Balance: {handling} ({h_val:+.2f})"
-        
-        h_color = "white"
-        if handling == "UNDERSTEER": h_color = "#00bfff" # Blue
-        elif handling == "OVERSTEER": h_color = "#ff4500" # Red
-        
-        self.lbl_handling.setText(h_text)
-        self.lbl_handling.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {h_color};")
-        
-        # v1.1: Opponent Info (Simple Top 3)
-        # We need to iterate participants and sort by position
-        opponents = []
-        for i in range(data.mNumParticipants):
-            p = data.mParticipantInfo[i]
-            if p.mIsActive:
-                opponents.append((p.mRacePosition, p.mName.decode('utf-8', errors='ignore').strip()))
-        
-        opponents.sort(key=lambda x: x[0])
-        opp_text = ""
-        for pos, name in opponents[:3]:
-            opp_text += f"P{pos}: {name}\n"
-        self.opponent_list.setText(opp_text if opp_text else "No Opponents")
-
-        # Always check for urgent engineer messages first
-        msg = self.engineer.get_message()
-        
-        if data.mGameState == 3: # Pause
-            # Prio 1: If Engineer wants to Box, show that clearly!
-            if "Box" in msg:
-                 self.feedback_text.setText(f"<h2 style='color:red'>!!! {msg} !!!</h2><br>Check Setup Recommendations below.")
-            
-            if analysis['ready']:
-                text = self.feedback_text.text() if "Box" in msg else "<b>PAUSE MODE - SETUP ANALYSIS</b><br><br>"
-                if "Box" in msg: text += "<br><hr><br>"
-                
-                # Tyres
-                text += "<b>TYRES:</b><br>"
-                tyre_info = analysis['tyres']
-                for tyre in ["FL", "FR", "RL", "RR"]:
-                    if tyre in tyre_info:
-                        info = tyre_info[tyre]
-                        text += f"{tyre}: {info['temp']:.1f}C - {info['action']}<br>"
-                        if info['camber_action']:
-                            text += f"&nbsp;&nbsp;-> {info['camber_action']}<br>"
-                
-                # Steering
-                if analysis['steering']:
-                    text += f"<br><b>STEERING:</b> {analysis['steering']}<br>"
-                
-                self.feedback_text.setText(text)
-            else:
-                # If not ready but we have a message (e.g. "One more lap"), show it
-                if msg and msg != "Daten werden gesammelt...":
-                    self.feedback_text.setText(f"<b>RACE ENGINEER:</b><br>{msg}<br><br>(Analysis not fully ready yet)")
-                else:
-                    self.feedback_text.setText("PAUSED. Not enough data for analysis yet.<br>Drive at least 2 clean laps.")
-        
-        elif data.mGameState == 2: # Playing
-            # Check if we are in Gathering/Checking phase to show live stats
-            if "Analysiere" in msg or "Sammle Daten" in msg:
-                # Show Live Analysis Stats
-                prog = self.engineer.tyre_analyzer.get_progress()
-                text = f"<b>RACE ENGINEER:</b><br>{msg}<br><br>"
-                text += f"<b>Live Analysis ({prog:.0f}%):</b><br>"
-                text += "Target: 75C - 85C<br>"
-                
-                # Get current averages from analyzer history if available, else current temp
-                analyzer = self.engineer.tyre_analyzer
-                for i, name in enumerate(analyzer.tyre_names):
-                    # Get last recorded temp from history if exists
-                    current_temp = data.mTyreTemp[i]
-                    avg_temp = current_temp
-                    if analyzer.history[i]:
-                        avg_temp = sum(x['avg'] for x in analyzer.history[i]) / len(analyzer.history[i])
-                    
-                    color = "white"
-                    if avg_temp < analyzer.target_min: color = "#00bfff" # Blue/Cold
-                    elif avg_temp > analyzer.target_max: color = "#ff4500" # Red/Hot
-                    else: color = "#00ff00" # Green/OK
-                    
-                    text += f"{name}: <span style='color:{color}'>{avg_temp:.1f}C</span> (Curr: {current_temp:.0f}C)<br>"
-                
-                self.feedback_text.setText(text)
-            else:
-                self.feedback_text.setText(f"<b>RACE ENGINEER:</b><br>{msg}")
-        
-        # --- Fuel & Wear Info (Always show if playing) ---
-        if data.mGameState == 2 or data.mGameState == 3: # Playing or Pause
-            fuel_status = self.fuel_monitor.get_status(data.mFuelLevel, data.mFuelCapacity)
-            wear_status = self.wear_monitor.get_status(data.mTyreWear)
-            
-            info_text = "<br><hr><b>VEHICLE STATUS:</b><br>"
-            
-            # Fuel
-            rem_laps = f"{fuel_status['remaining_laps']:.1f}" if fuel_status['remaining_laps'] < 100 else ">100"
-            info_text += f"Fuel: {fuel_status['liters']:.1f}L ({rem_laps} Laps left)<br>"
-            
-            # Wear
-            info_text += "Tyres (Rem. Laps):<br>"
-            
-            def fmt_wear(w):
-                laps = f"{w['remaining_laps']:.1f}" if w['remaining_laps'] < 100 else ">100"
-                return f"{w['wear_percent']:.0f}% ({laps}L)"
-                
-            info_text += f"FL: {fmt_wear(wear_status['FL'])} | FR: {fmt_wear(wear_status['FR'])}<br>"
-            info_text += f"RL: {fmt_wear(wear_status['RL'])} | RR: {fmt_wear(wear_status['RR'])}<br>"
-            
-            # Append to existing text
-            current_text = self.feedback_text.text()
-            self.feedback_text.setText(current_text + info_text)
-        
-        else:
-            # GameState 1 (Menu) or others
-            # If we have analysis ready (e.g. in Pit Menu), SHOW IT!
-            analysis = self.engineer.get_analysis()
-            if analysis['ready']:
-                text = "<b>PIT MENU - SETUP ANALYSIS</b><br><br>"
-                
-                # Tyres
-                text += "<b>TYRES:</b><br>"
-                tyre_info = analysis['tyres']
-                for tyre in ["FL", "FR", "RL", "RR"]:
-                    if tyre in tyre_info:
-                        info = tyre_info[tyre]
-                        text += f"{tyre}: {info['temp']:.1f}C - {info['action']}<br>"
-                        if info['camber_action']:
-                            text += f"&nbsp;&nbsp;-> {info['camber_action']}<br>"
-                
-                # Steering
-                if analysis['steering']:
-                    text += f"<br><b>STEERING:</b> {analysis['steering']}<br>"
-                
-                self.feedback_text.setText(text)
-            else:
-                self.feedback_text.setText("Waiting for session...")
-
-    def toggle_always_on_top(self, state):
-        if state == 2: # Checked
-            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        else:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
-        self.show()
+        layout.addWidget(QLabel("Markers: Red=Lockup, Cyan=U-Steer, Orange=O-Steer"))
 
     def update_loop(self):
         if not self.connected:
             if self.reader.connect():
                 self.connected = True
-                self.status_label.setText("CONNECTED")
-                self.status_label.setStyleSheet("font-weight: bold; color: green; font-size: 14px;")
+                # self.lbl_status.setText("CONNECTED") # Overwritten below
             else:
-                self.status_label.setText("CONNECTING...")
-                self.status_label.setStyleSheet("font-weight: bold; color: orange; font-size: 14px;")
+                self.lbl_status.setText("CONNECTING...")
                 return
 
         data = self.reader.read()
-        if data:
-            # Game State Logic
-            if data.mGameState == 1:
-                state_str = "MENU"
-            elif data.mGameState == 2:
-                state_str = "PLAYING"
-            elif data.mGameState == 3:
-                state_str = "PAUSED"
-            else:
-                state_str = f"STATE {data.mGameState}"
-            
-            self.status_label.setText(f"GAME STATE: {state_str}")
-            
-            # --- Update Components ---
+        if not data: return
+        
+        # Debug Status
+        state_map = {0: "EXIT", 1: "MENU", 2: "PLAYING", 3: "PAUSED"}
+        gs = state_map.get(data.mGameState, str(data.mGameState))
+        ss = data.mSessionState
+        
+        # Raw Data Check
+        raw_t = data.mTyreTemp[0] if hasattr(data, 'mTyreTemp') else -99
+        raw_time = data.mCurrentTime
+        
+        self.lbl_status.setText(f"CON | GS:{gs} | SS:{ss} | T:{raw_t:.1f} | Time:{raw_time:.1f}")
+        
+        # v2.0: Help Prompt if data is zeros
+        if data.mGameState == 0 and data.mSessionState == 0 and raw_time == 0.0:
+            self.lbl_message.setText("No Data? Enable 'Shared Memory' in AMS2 Options -> System -> Project CARS 2")
+            self.lbl_message.setStyleSheet("background-color: purple; color: white; font-size: 18px; font-weight: bold;")
+            return # Skip other updates to avoid crashes on zero data
+        
+        try:
+            # Update Components
             self.engineer.update(data)
             self.recorder.update(data)
             self.fuel_monitor.update(data)
             self.wear_monitor.update(data)
             
-            # --- Lap Management ---
-            car_name = data.mCarName.decode('utf-8', errors='ignore').strip()
-            track_name = data.mTrackLocation.decode('utf-8', errors='ignore').strip()
+            # Update UI Tabs
+            self.update_live_tab(data)
             
-            # Check for new lap
-            viewed_idx = data.mViewedParticipantIndex
-            if 0 <= viewed_idx < data.mNumParticipants:
-                current_lap = data.mParticipantInfo[viewed_idx].mCurrentLap
+            # Only update Setup/Track if visible or periodically
+            # (Optimization)
+            current_idx = self.tabs.currentIndex()
+            if current_idx == 1: # Setup
+                self.update_setup_tab()
+            elif current_idx == 2: # Track
+                self.update_track_tab()
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.lbl_status.setText(f"ERROR: {str(e)}")
+            self.lbl_status.setStyleSheet("font-weight: bold; color: red;")
+
+    def update_live_tab(self, data):
+        try:
+            # Times
+            self.lbl_current_lap.setText(f"Current: {self.format_time(data.mCurrentTime)}")
+            if data.mBestLapTime > 0:
+                self.lbl_best_lap.setText(f"Best: {self.format_time(data.mBestLapTime)}")
                 
-                # On first connection, just sync the lap counter, don't trigger save
-                if self.first_update:
-                    self.last_lap = current_lap
-                    self.first_update = False
+            # Delta (Assume we can calculate or use existing?)
+            # For prototype, we don't have perfect delta without a reference lap system.
+            # Use simple sector delta logic if available, or just "-"
+            # AMS2 doesn't give live delta in shared memory easily without reference lap.
+            # We will leave as placeholder or use SplitTime if available?
+            # mSplitTime might be available.
+            if hasattr(data, 'mSplitTime') and data.mSplitTime != 0.0:
+                delta = data.mSplitTime
+                sign = "+" if delta > 0 else ""
+                color = "#ff0000" if delta > 0 else "#00ff00"
+                self.lbl_delta.setText(f"{sign}{delta:.3f}")
+                self.lbl_delta.setStyleSheet(f"background-color: {color}; color: black; font-weight: bold; font-size: 40px;")
+            else:
+                 self.lbl_delta.setText("--.---")
+                 self.lbl_delta.setStyleSheet("background-color: #333; color: white;")
+
+            # Tires (Color Coded)
+            analysis = self.engineer.get_analysis()
+            
+            tyre_info = analysis['tyres']
+            labels = [self.lbl_fl, self.lbl_fr, self.lbl_rl, self.lbl_rr]
+            keys = ["FL", "FR", "RL", "RR"]
+            
+            for i, key in enumerate(keys):
+                if key in tyre_info:
+                    info = tyre_info[key]
+                    temp = info['temp']
+                    color = info['color']
+                    # Map logic color to hex
+                    hex_col = "#ffffff"
+                    if color == "blue": hex_col = "#00bfff"
+                    elif color == "red": hex_col = "#ff4500"
+                    elif color == "green": hex_col = "#00ff00"
+                    
+                    labels[i].setText(f"{key}\n{temp:.0f}C")
+                    labels[i].setStyleSheet(f"background-color: #444; border: 2px solid {hex_col}; color: {hex_col}; font-weight: bold;")
+                else:
+                    labels[i].setText(f"{key}\nNO DATA")
+
+            # Message - Priority to Engineer
+            msg = self.engineer.get_message()
+            if "BOX" in msg:
+                self.lbl_message.setText(msg)
+                self.lbl_message.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 24px;")
+            else:
+                self.lbl_message.setText(msg)
+                self.lbl_message.setStyleSheet("background-color: #222; color: #aaa;")
                 
-                # If lap changed or just started
-                elif current_lap > self.last_lap:
-                    # Try to save last lap time if valid
-                    if data.mLastLapTime > 0:
-                        session_type = data.mSessionState 
-                        self.lap_manager.save_best_lap(car_name, track_name, data.mLastLapTime, str(session_type))
-                        
-                        # End of Lap: Check Sector 3
-                        if data.mCurrentSector3Time > 0:
-                             if self.best_sectors[2] == 0 or data.mCurrentSector3Time < self.best_sectors[2]:
-                                 self.best_sectors[2] = data.mCurrentSector3Time
-                        pass
+            # Info
+            dist = analysis.get('distance', 0.0)
+            self.lbl_dist.setText(f"Dist: {dist:.1f} km")
+            
+            # Phase (Debug)
+            phase = self.engineer.core_engine.phase_detector.current_phase
+            self.lbl_phase.setText(f"Phase: {phase}")
 
-                    self.last_lap = current_lap
-                    self.update_best_lap_label(car_name, track_name)
+            # Balance
+            bal = analysis['handling']
+            self.lbl_handling.setText(f"Bal: {bal}")
+            if bal == "OVERSTEER": self.lbl_handling.setStyleSheet("color: orange;")
+            elif bal == "UNDERSTEER": self.lbl_handling.setStyleSheet("color: cyan;")
+            else: self.lbl_handling.setStyleSheet("color: white;")
             
-            # --- Sector Tracking ---
-            # We need to detect when a sector finishes to capture the time
-            # Current Sector: 1 -> 2 (S1 done), 2 -> 3 (S2 done), 3 -> 1 (S3 done - handled above in lap change)
-            
-            # We need to store the previous sector to detect change
-            if not hasattr(self, 'last_sector_idx'): self.last_sector_idx = data.mParticipantInfo[data.mViewedParticipantIndex].mCurrentSector
+        except Exception as e:
+            import traceback
+            print("ERROR in Live Tab:")
+            traceback.print_exc()
+            self.lbl_message.setText(f"ERR: {str(e)}")
+            self.lbl_message.setStyleSheet("background-color: purple; color: white;")
 
-            current_sector_idx = data.mParticipantInfo[data.mViewedParticipantIndex].mCurrentSector
-            
-            if current_sector_idx != self.last_sector_idx:
-                # Sector Changed
-                if self.last_sector_idx == 1 and current_sector_idx == 2:
-                    # S1 Finished
-                    if data.mCurrentSector1Time > 0:
-                        if self.best_sectors[0] == 0 or data.mCurrentSector1Time < self.best_sectors[0]:
-                            self.best_sectors[0] = data.mCurrentSector1Time
-                            
-                elif self.last_sector_idx == 2 and current_sector_idx == 3:
-                    # S2 Finished
-                    if data.mCurrentSector2Time > 0:
-                        if self.best_sectors[1] == 0 or data.mCurrentSector2Time < self.best_sectors[1]:
-                            self.best_sectors[1] = data.mCurrentSector2Time
-            
-            self.last_sector_idx = current_sector_idx
-            
-            # Fallback: Also trust AMS2 if it reports a personal best
-            if data.mPersonalFastestSector1Time > 0 and (self.best_sectors[0] == 0 or data.mPersonalFastestSector1Time < self.best_sectors[0]): self.best_sectors[0] = data.mPersonalFastestSector1Time
-            if data.mPersonalFastestSector2Time > 0 and (self.best_sectors[1] == 0 or data.mPersonalFastestSector2Time < self.best_sectors[1]): self.best_sectors[1] = data.mPersonalFastestSector2Time
-            if data.mPersonalFastestSector3Time > 0 and (self.best_sectors[2] == 0 or data.mPersonalFastestSector3Time < self.best_sectors[2]): self.best_sectors[2] = data.mPersonalFastestSector3Time
-
-            # --- UI Updates ---
-            self.update_session_tab(data)
-            
-            # Update Track Map periodically (e.g. every 10th frame) or if recording
-            if self.recorder.track_data:
-                self.update_track_map()
-
-    def add_lap_to_table(self, lap_num, time_val, note="-"):
-        from PyQt6.QtWidgets import QTableWidgetItem
-        row = self.laps_table.rowCount()
-        self.laps_table.insertRow(row)
+    def update_setup_tab(self):
+        # Populate List with Core Events + Tyre Issues
+        analysis = self.engineer.get_analysis()
         
-        # Format time
-        m = int(time_val // 60)
-        s = int(time_val % 60)
-        ms = int((time_val * 1000) % 1000)
-        time_str = f"{m:02d}:{s:02d}.{ms:03d}"
+        # Only update if item count changes to avoid flicker (simple check)
+        # Or clear and rebuild? Qt is fast enough usually.
+        # Better: Store last summary header
         
-        self.laps_table.setItem(row, 0, QTableWidgetItem(str(lap_num)))
-        self.laps_table.setItem(row, 1, QTableWidgetItem(time_str))
-        self.laps_table.setItem(row, 2, QTableWidgetItem("-")) # Sector placeholder
-        self.laps_table.setItem(row, 3, QTableWidgetItem(note))
+        summary = analysis['core_events']['summary']
+        
+        # Check current items
+        current_rows = self.problem_list.count()
+        
+        # If active, we might want to refresh.
+        self.problem_list.clear() # Brute force for now
+        
+        # 1. Tyres
+        for t_name, t_info in analysis['tyres'].items():
+            if "OK" not in t_info['action']:
+                item = QListWidgetItem(f"Tyre {t_name}: {t_info['status']}")
+                item.setData(Qt.ItemDataRole.UserRole, f"{t_info['action']}\n{t_info['details']}")
+                self.problem_list.addItem(item)
+            if "OK" not in t_info['camber_action']:
+                item = QListWidgetItem(f"Camber {t_name}: Adjust")
+                item.setData(Qt.ItemDataRole.UserRole, t_info['camber_action'])
+                self.problem_list.addItem(item)
+                
+        # 2. Core Events
+        for name, info in summary.items():
+            count = info['count']
+            item = QListWidgetItem(f"{name} ({count}x)")
+            item.setData(Qt.ItemDataRole.UserRole, info['suggestion'])
+            self.problem_list.addItem(item)
+            
+        # Feedback Label
+        fb = analysis['feedback']
+        if fb:
+            self.lbl_feedback.setText(f"Stint Comparison: {fb}")
+        else:
+            self.lbl_feedback.setText("Stint Comparison: Ref Gathering...")
 
-    def update_best_lap_label(self, car, track):
-        best = self.lap_manager.get_best_lap(car, track)
-        if best:
-            self.best_lap_label.setText(f"Best Lap: {best['time']:.3f} ({best['date']})")
+    def on_problem_selected(self, current, previous):
+        if not current: return
+        advice = current.data(Qt.ItemDataRole.UserRole)
+        self.txt_advice.setText(advice)
 
-    def update_track_map(self):
-        # This can be expensive, so maybe optimize later
+    def update_track_tab(self):
+        self.map_update_counter += 1
+        if self.map_update_counter < 10: return # Limit FPS
+        self.map_update_counter = 0
+        
         path = self.recorder.get_track_path()
         if not path: return
         
         self.ax.clear()
         
-        # Extract data
+        # Draw Track
         x = [p[0] for p in path]
         z = [p[1] for p in path]
-        speeds = [p[2] for p in path]
+        self.ax.plot(x, z, color='white', linewidth=1)
         
-        # Color Mapping
-        # Slow < 80 km/h (Red), Med < 160 (Yellow), Fast > 160 (Green)
-        colors = []
-        for s in speeds:
-            if s < 80:
-                colors.append('red')
-            elif s < 160:
-                colors.append('yellow')
-            else:
-                colors.append('green')
+        # Draw Events
+        analysis = self.engineer.get_analysis()
+        events = analysis['core_events']['events']
         
-        # Scatter plot for colored points
-        self.ax.scatter(x, z, c=colors, s=2)
+        # Separate by type for colors
+        lockups_x, lockups_z = [], []
+        under_x, under_z = [], []
+        over_x, over_z = [], []
+        
+        for e in events:
+            if "Lockup" in e['name']:
+                lockups_x.append(e['x'])
+                lockups_z.append(e['z'])
+            elif "Understeer" in e['name']:
+                under_x.append(e['x'])
+                under_z.append(e['z'])
+            elif "Oversteer" in e['name']:
+                over_x.append(e['x'])
+                over_z.append(e['z'])
+                
+        if lockups_x: self.ax.scatter(lockups_x, lockups_z, c='red', s=20, label='Lockup')
+        if under_x: self.ax.scatter(under_x, under_z, c='cyan', s=20, label='Understeer')
+        if over_x: self.ax.scatter(over_x, over_z, c='orange', s=20, label='Oversteer')
         
         self.ax.set_aspect('equal')
         self.ax.axis('off')
-        self.ax.set_facecolor('#2b2b2b')
         
-        # Mark tightest corner
-        corner = self.recorder.get_tightest_corner()
-        if corner:
-            self.ax.plot(corner[1], corner[2], 'wo', markersize=8) # White circle background
-            self.ax.text(corner[1], corner[2], "!", color='red', fontsize=12, fontweight='bold', ha='center', va='center')
-        
-        # v1.1: Draw Brake Points
-        brake_points = self.recorder.get_brake_points()
-        if brake_points:
-             bx = [p[0] for p in brake_points]
-             bz = [p[1] for p in brake_points]
-             self.ax.plot(bx, bz, 'ro', markersize=3, label="Brake")
-
-        # v1.1: Draw Corner Speeds
-        # v1.1: Draw Corner Speeds - REMOVED per requirements
-        # corner_speeds = self.recorder.get_corner_speeds()
-        # if corner_speeds: ...
-
         self.canvas.draw()
 
     def format_time(self, seconds):
@@ -579,25 +443,31 @@ class MainWindow(QMainWindow):
         s = int(seconds % 60)
         ms = int((seconds * 1000) % 1000)
         return f"{m:02d}:{s:02d}.{ms:03d}"
+        
+    def toggle_always_on_top(self, state):
+        if state == 2:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowStaysOnTopHint)
+        self.show()
 
     def apply_dark_theme(self):
-        # Simple Dark Palette
         palette = QPalette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+        palette.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
         palette.setColor(QPalette.ColorRole.WindowText, Qt.GlobalColor.white)
-        palette.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
-        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+        palette.setColor(QPalette.ColorRole.Base, QColor(15, 15, 15))
+        palette.setColor(QPalette.ColorRole.AlternateBase, QColor(30, 30, 30))
         palette.setColor(QPalette.ColorRole.ToolTipBase, Qt.GlobalColor.white)
         palette.setColor(QPalette.ColorRole.ToolTipText, Qt.GlobalColor.white)
         palette.setColor(QPalette.ColorRole.Text, Qt.GlobalColor.white)
-        palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+        palette.setColor(QPalette.ColorRole.Button, QColor(45, 45, 45))
         palette.setColor(QPalette.ColorRole.ButtonText, Qt.GlobalColor.white)
         palette.setColor(QPalette.ColorRole.BrightText, Qt.GlobalColor.red)
         palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
         palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
         palette.setColor(QPalette.ColorRole.HighlightedText, Qt.GlobalColor.black)
-        
         self.setPalette(palette)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

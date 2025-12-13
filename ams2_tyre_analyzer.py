@@ -13,6 +13,7 @@ class TyreAnalyzer:
         # History: [FL, FR, RL, RR]
         # Each: list of dicts with keys: time, avg, l, c, r
         self.history = [[], [], [], []]
+        self.current_temps = [0.0, 0.0, 0.0, 0.0]
         
         # Updated Targets based on Lastenheft
         self.target_min = 75.0
@@ -24,6 +25,11 @@ class TyreAnalyzer:
         self.tyre_names = ["FL", "FR", "RL", "RR"]
 
     def update(self, data):
+        # Always capture current raw temps for live dashboard (even in menu/pits)
+        self.current_temps = [
+            data.mTyreTemp[0], data.mTyreTemp[1], data.mTyreTemp[2], data.mTyreTemp[3],
+        ]
+        
         # Robust Time Tracking
         # We accumulate delta_time to create a monotonic internal_time
         # This handles Pauses (dt=0) and Time Wraps/Resets (dt<0) gracefully
@@ -41,6 +47,7 @@ class TyreAnalyzer:
         if dt < 0: dt = 0
             
         # Check if valid driving state (GameState 2 = Playing)
+        # Note: We still only UPDATE HISTORY in Playing mode
         if data.mGameState != 2: 
             return
             
@@ -59,7 +66,7 @@ class TyreAnalyzer:
         else:
              return
 
-        # Collect Data
+        # Collect Data (History)
         for i in range(4):
             t_avg = data.mTyreTemp[i]
             t_l = data.mTyreTempLeft[i]
@@ -81,130 +88,96 @@ class TyreAnalyzer:
                 self.history[i].pop(0)
                 
             self._check_stability(i)
-
-    def _check_stability(self, i):
-        # Need at least 80% of the history window filled
-        if len(self.history[i]) < (self.history_duration * self.sample_rate * 0.8):
-            self.is_stable[i] = False
-            return
             
-        temps = [h['avg'] for h in self.history[i]]
-        
-        if not temps:
-            self.is_stable[i] = False
-            return
-
-        if (max(temps) - min(temps)) < self.stability_threshold:
-            self.is_stable[i] = True
-        else:
-            self.is_stable[i] = False
-
-    def reset(self):
-        print("DEBUG: TyreAnalyzer Reset called!")
-        self.history = [[], [], [], []]
-        self.is_stable = [False] * 4
-        self.last_game_time = -1.0
-        self.internal_time = 0.0
-        self.last_sample_internal_time = -1.0
-
-    def are_all_stable(self):
-        return all(self.is_stable)
-
-    def get_progress(self):
-        # Calculate progress based on filled history
-        # We need history_duration * sample_rate samples
-        target_samples = self.history_duration * self.sample_rate
-        
-        # Find the tire with the LEAST history to be conservative
-        min_samples = min([len(h) for h in self.history])
-        
-        progress = (min_samples / target_samples) * 100.0
-        return min(100.0, max(0.0, progress))
+    # ... (omitted) ...
 
     def get_analysis(self):
         # Return analysis regardless of stability, caller decides when to show it
         results = {}
         for i in range(4):
-            if not self.history[i]:
-                continue
-
-            # Calculate averages over the history
-            avg_t = statistics.mean([h['avg'] for h in self.history[i]])
-            avg_l = statistics.mean([h['l'] for h in self.history[i]])
-            avg_c = statistics.mean([h['c'] for h in self.history[i]])
-            avg_r = statistics.mean([h['r'] for h in self.history[i]])
+            # Fallback to current live temp if history empty
+            avg_t = self.current_temps[i]
             
-            # --- Pressure Analysis ---
-            status = "OK"
-            action = "Druck OK"
-            color = "green"
+            # Defaults if no history
+            status = "Waiting..."
+            action = "-"
+            color = "white" # Neutral
+            details = ""
+            camber_action = "-"
+            temp_inner = 0.0
+            temp_outer = 0.0
             
-            if avg_t < self.target_min:
-                status = "Zu KALT"
-                action = "Druck VERRINGERN (-)"
-                color = "blue"
-            elif avg_t > self.target_max:
-                status = "Zu HEISS"
-                action = "Druck ERHÖHEN (+)"
-                color = "red"
-            
-            # Check spread (Center vs Edges) for pressure fine-tuning
-            edges_avg = (avg_l + avg_r) / 2
-            spread_msg = ""
-            
-            if avg_c > (edges_avg + 3.0): 
-                spread_msg = " (Mitte heiß -> Überdruck?)"
-            elif avg_c < (edges_avg - 3.0): 
-                spread_msg = " (Mitte kalt -> Unterdruck?)"
-            
-            # --- Camber Analysis ---
-            # Determine Inner/Outer based on wheel position
-            # FL (0) & RL (2): Left side of car -> Inner is Right side of tyre (TempRight), Outer is Left side (TempLeft)
-            # FR (1) & RR (3): Right side of car -> Inner is Left side of tyre (TempLeft), Outer is Right side of tyre (TempRight)
-            
-            is_left_side = (i == 0 or i == 2)
-            is_front = (i == 0 or i == 1)
-            
-            if is_left_side:
-                temp_inner = avg_r
-                temp_outer = avg_l
-            else:
-                temp_inner = avg_l
-                temp_outer = avg_r
+            # If we have history, do the real analysis
+            if self.history[i]:
+                # Calculate averages over the history
+                avg_t = statistics.mean([h['avg'] for h in self.history[i]])
+                avg_l = statistics.mean([h['l'] for h in self.history[i]])
+                avg_c = statistics.mean([h['c'] for h in self.history[i]])
+                avg_r = statistics.mean([h['r'] for h in self.history[i]])
                 
-            delta = temp_inner - temp_outer
-            
-            # Target Deltas
-            # Front: Inner 7C > Outer
-            # Rear: Inner 3-5C > Outer
-            
-            camber_action = ""
-            
-            if is_front:
-                target_delta = 7.0
-                tolerance = 1.5
-                if delta < (target_delta - tolerance):
-                    # Delta too small (Inner not hot enough) -> Need more negative camber to heat inside
-                    camber_action = "Sturz VERRINGERN (negativer)" 
-                elif delta > (target_delta + tolerance):
-                    # Delta too big (Inner too hot) -> Need less negative camber
-                    camber_action = "Sturz ERHÖHEN (positiver)"
-            else:
-                target_delta_min = 3.0
-                target_delta_max = 5.0
-                if delta < target_delta_min:
-                    camber_action = "Sturz VERRINGERN (negativer)"
-                elif delta > target_delta_max:
-                    camber_action = "Sturz ERHÖHEN (positiver)"
-            
-            if not camber_action:
-                camber_action = "Sturz OK"
+                # --- Pressure Analysis ---
+                status = "OK"
+                action = "Druck OK"
+                color = "green"
+                
+                if avg_t < self.target_min:
+                    status = "Zu KALT"
+                    action = "Druck VERRINGERN (-)"
+                    color = "blue"
+                elif avg_t > self.target_max:
+                    status = "Zu HEISS"
+                    action = "Druck ERHÖHEN (+)"
+                    color = "red"
+                
+                # Check spread (Center vs Edges)
+                edges_avg = (avg_l + avg_r) / 2
+                spread_msg = ""
+                
+                if avg_c > (edges_avg + 3.0): 
+                    spread_msg = " (Mitte heiß -> Überdruck?)"
+                elif avg_c < (edges_avg - 3.0): 
+                    spread_msg = " (Mitte kalt -> Unterdruck?)"
+                    
+                details = spread_msg
+                
+                # --- Camber Analysis ---
+                is_left_side = (i == 0 or i == 2)
+                is_front = (i == 0 or i == 1)
+                
+                if is_left_side:
+                    temp_inner = avg_r
+                    temp_outer = avg_l
+                else:
+                    temp_inner = avg_l
+                    temp_outer = avg_r
+                    
+                delta = temp_inner - temp_outer
+                
+                camber_action = ""
+                
+                if is_front:
+                    target_delta = 7.0
+                    tolerance = 1.5
+                    if delta < (target_delta - tolerance):
+                        camber_action = "Sturz VERRINGERN (negativer)" 
+                    elif delta > (target_delta + tolerance):
+                        camber_action = "Sturz ERHÖHEN (positiver)"
+                else:
+                    target_delta_min = 3.0
+                    target_delta_max = 5.0
+                    if delta < target_delta_min:
+                        camber_action = "Sturz VERRINGERN (negativer)"
+                    elif delta > target_delta_max:
+                        camber_action = "Sturz ERHÖHEN (positiver)"
+                
+                if not camber_action:
+                    camber_action = "Sturz OK"
 
             results[self.tyre_names[i]] = {
                 'temp': avg_t,
                 'status': status,
                 'action': action,
-                'details': spread_msg,
+                'details': details,
                 'camber_action': camber_action,
                 'temp_inner': temp_inner,
                 'temp_outer': temp_outer,

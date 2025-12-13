@@ -1,10 +1,12 @@
 from ams2_tyre_analyzer import TyreAnalyzer
 from ams2_steering_analyzer import SteeringAnalyzer
+from ams2_analysis_core import AnalysisEngine
 
 class RaceEngineer:
     def __init__(self):
         self.tyre_analyzer = TyreAnalyzer()
         self.steering_analyzer = SteeringAnalyzer()
+        self.core_engine = AnalysisEngine()
         
         # States
         self.STATE_WAITING = "WAITING"         # Waiting for race to start
@@ -50,7 +52,7 @@ class RaceEngineer:
         
         # Calculate laps completed (AMS2 mCurrentLap starts at 1)
         current_lap = 0
-        if 0 <= data.mViewedParticipantIndex < data.mNumParticipants:
+        if 0 <= data.mViewedParticipantIndex < data.mNumParticipants and data.mViewedParticipantIndex < 64:
              current_lap = data.mParticipantInfo[data.mViewedParticipantIndex].mCurrentLap
         
         laps_completed = current_lap - 1 if current_lap > 0 else 0
@@ -58,6 +60,7 @@ class RaceEngineer:
         
         self.tyre_analyzer.update(data)
         self.steering_analyzer.update(data, current_lap)
+        self.core_engine.update(data)
         
         # v1.1: Handling Analysis (Realtime)
         self.check_handling_balance(data)
@@ -100,6 +103,7 @@ class RaceEngineer:
                 self.setup_feedback = None # Reset feedback for new run
                 
                 self.tyre_analyzer.reset()
+                self.core_engine.reset() # Reset core events
                 self.message = "Neuer Run gestartet. Sammle Daten..."
                 self.has_visited_pits = False
             else:
@@ -115,6 +119,7 @@ class RaceEngineer:
             self.start_lap = laps_completed
             self.stint_start_odometer = data.mOdometerKM # Init odometer
             self.tyre_analyzer.reset()
+            self.core_engine.reset()
             
         # Analysis Logic
         
@@ -123,7 +128,7 @@ class RaceEngineer:
             # v1.1: Check Session State - If RACE, do NOT analyze for Setup
             # mSessionState: 0=Invalid, 1=Practice, 2=Test, 3=Quali, 4=Formation, 5=Race, 6=TimeAttack
             if data.mSessionState == 5: # RACE
-                 self.message = f"RACE - {self.driven_distance_stint:.1f} km - {self.handling_status}"
+                 self.message = f"RACE - {self.driven_distance_stint:.1f} km - pHASE: {self.core_engine.phase_detector.current_phase}"
                  return
 
             # v1.1: Check Distance Threshold
@@ -133,11 +138,18 @@ class RaceEngineer:
                 analysis = self.get_analysis()
                 
                 # Check if we need changes
+                # Need changes if Tyres BAD OR Core Events exist
                 needs_change = False
+                
+                # Check Tyres
                 for t in analysis['tyres'].values():
                     if "OK" not in t['action'] or "OK" not in t['camber_action']:
                         needs_change = True
                         break
+                
+                # Check Core Events
+                if analysis['core_events']:
+                    needs_change = True
                 
                 if needs_change:
                     self.state = self.STATE_BOX
@@ -152,20 +164,15 @@ class RaceEngineer:
                     self.previous_run_snapshot = analysis
                     
                 else:
-                    # If everything is OK, we can stay in GATHERING/CHECKING or just say OK
-                    # But maybe we want to keep monitoring?
-                    # Let's say "Setup OK" but keep monitoring (don't lock to BOX state unless user wants to stop)
-                    # Actually, if it's OK, we might want to "lock" it as a "Good Run" or just keep updating.
-                    # For now, let's keep updating but show "Setup OK".
                     self.message = f"Setup OK. ({self.driven_distance_stint:.1f} km)"
                     
-                    # Also compare if we had a previous run (maybe we improved it to be OK?)
                     if self.previous_run_snapshot and self.setup_feedback is None:
                          self.evaluate_setup_change(analysis)
 
             else:
                 # Not enough distance yet
-                self.message = f"Analysiere... ({self.driven_distance_stint:.1f}/{self.analysis_distance_threshold:.0f}km) - {self.handling_status}"
+                phase = self.core_engine.phase_detector.current_phase
+                self.message = f"Analysiere... ({self.driven_distance_stint:.1f}km) - {phase}"
 
     def check_handling_balance(self, data):
         # Slip Speed based analysis
@@ -205,26 +212,31 @@ class RaceEngineer:
         if not self.previous_run_snapshot:
             return
 
-        # Simple logic: Count how many "OK"s we have now vs before
-        
-        def count_ok(analysis):
+        # Improved logic: Count problems
+        def count_problems(analysis):
             count = 0
+            # Tyres
             for t in analysis['tyres'].values():
-                if "OK" in t['action']: count += 1
-                if "OK" in t['camber_action']: count += 1
+                if "OK" not in t['action']: count += 1
+                if "OK" not in t['camber_action']: count += 1
+            
+            # Core Events
+            for event in analysis['core_events'].values():
+                count += event['count']
+                
             return count
             
-        prev_ok = count_ok(self.previous_run_snapshot)
-        curr_ok = count_ok(current_analysis)
+        prev_probs = count_problems(self.previous_run_snapshot)
+        curr_probs = count_problems(current_analysis)
         
-        if curr_ok > prev_ok:
+        if curr_probs < prev_probs:
             self.setup_feedback = "IMPROVED"
-        elif curr_ok < prev_ok:
+        elif curr_probs > prev_probs:
             self.setup_feedback = "WORSENED"
         else:
             self.setup_feedback = "NEUTRAL"
             
-        print(f"DEBUG: Setup Evaluation: Prev OK={prev_ok}, Curr OK={curr_ok} -> {self.setup_feedback}")
+        print(f"DEBUG: Setup Evaluation: Prev Problems={prev_probs}, Curr Problems={curr_probs} -> {self.setup_feedback}")
 
     def get_message(self):
         return self.message
@@ -233,12 +245,13 @@ class RaceEngineer:
         # Combine analysis from components
         tyre_analysis = self.tyre_analyzer.get_analysis()
         steering_rec = self.steering_analyzer.get_recommendation()
+        core_summary = self.core_engine.get_analysis_summary()
         
         return {
             'tyres': tyre_analysis,
             'steering': steering_rec,
+            'core_events': core_summary,
             'ready': (self.state == self.STATE_BOX),
-            'distance': self.driven_distance_stint,
             'distance': self.driven_distance_stint,
             'feedback': self.setup_feedback,
             'handling': self.handling_status,

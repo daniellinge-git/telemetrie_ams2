@@ -1,73 +1,177 @@
-# Lastenheft: AMS2 Telemetrie Analyse System
+Lastenheft: AMS2 Telemetrie & Virtual Race Engineer (v2.0)
+1. Einleitung
+Dieses Dokument beschreibt die Anforderungen an ein erweitertes Telemetrie-Analyse-System für Automobilista 2. Das System liest Fahrdaten in Echtzeit aus, visualisiert diese und fungiert als "Virtueller Race Engineer". Es analysiert das Fahrverhalten anhand definierter Regelwerke (basierend auf der Chris Haye Setup-Methodik), um konkrete Vorschläge zur Verbesserung des Fahrzeug-Setups zu generieren.
 
-## 1. Einleitung
-Dieses Dokument beschreibt die Anforderungen an ein Telemetrie-Analyse-System für die Rennsimulation Automobilista 2 (AMS2). Ziel ist es, fahrzeug- und fahrerspezifische Daten auszulesen, zu speichern und zu analysieren, um die Fahrperformance zu optimieren.
+2. Projektziele
+Echtzeit-Datenerfassung: Latenzarmes Auslesen der Shared Memory API.
 
-## 2. Projektziele
-- **Echtzeit-Datenerfassung**: Auslesen der Telemetriedaten über die Shared Memory API von AMS2.
-- **Datenanalyse**: Aufbereitung der Daten zur Identifikation von Fahrfehlern und Setup-Problemen.
-- **Visualisierung**: Grafische Darstellung von Rundenzeiten, Geschwindigkeiten, Reifen-Temperaturen, etc.
+Kontext-Erkennung: Das System versteht, wo sich das Fahrzeug befindet (Gerade, Bremszone, Kurveneingang, Scheitelpunkt, Ausgang).
 
-## 3. Funktionale Anforderungen
+Setup-Beratung: Automatische Ableitung von Setup-Änderungen bei Problemen (z. B. Übersteuern, Reifentemperatur, Blockieren).
 
-### 3.1 Datenerfassung
-- Anbindung an AMS2 Shared Memory.
-- Speichern der Kombination von Fahrzeug und Strecke:
-    - Fahrzeug
-    - Strecke
-    - Datum
-    - Uhrzeit
-    - Session
-    - Beste Rundenzeit
-- Aufzeichnung folgender Metriken:
-    - Wetterbedingungen
-    - Geschwindigkeit, Drehzahl, Gang
-    - Gas-, Brems-, Kupplungspedalstellung
-    - Lenkwinkel
-    - Reifentemperaturen, -drücke, -abnutzung
-    - Positionsdaten (X, Y, Z) für Streckenkarten
+Daten-Persistenz: Speicherung von Runden, Sektoren und dazugehörigen Setup-Empfehlungen.
 
-### 3.2 Datenverarbeitung & Speicherung
-- Speicherung der Sessions (CSV).
-    - Automatische Erstellung von `best_laps.csv`.
-    - Speicherung der besten Rundenzeit pro Auto/Strecke/Session-Typ.
-- Erkennung von Runden (Start/Ziel).
-- Segmentierung der Strecke (Sektoren).
+3. Funktionale Anforderungen
+3.1 Datenerfassung (Inputs)
+Das System muss folgende Metriken über die Shared Memory API erfassen:
 
-### 3.3 Analyse & Feedback
-- **Race Engineer (Ingenieur)**:
-    - Analyse der Reifentemperaturen und -drücke.
-    - Analyse des Lenkverhaltens (Untersteuern/Übersteuern).
-    - **NEU (v1.1):** Analyse-Trigger basierend auf **gefahrenen Kilometern** (statt nur Stabilität/Runden).
-    - **NEU (v1.1):** Mindestdistanz vor erster Analyse: 10 km.
-    - **NEU (v1.1):** Reset der Analyse-Strecke bei Boxenstopp.
-    - **NEU (v1.1):** Vergleichsanalyse nach Boxenstopp: Bewertung von Setup-Änderungen (Positiv/Negativ).
-    - **NEU:** Meldung "BOX, Änderung Notwendig!" sobald stabile Daten vorliegen und Handlungsbedarf besteht.
-    - **NEU:** Persistenz der Analyse-Ergebnisse auch bei Boxenstopps oder Pausen.
+Basis: Fahrzeug-ID, Strecken-ID, Session-Status, Rundenzeit.
 
-## 4. Benutzeroberfläche (UI)
-- **Technologie**: PyQt6 (Desktop-Overlay).
-- **Layout**: 3 Reiter (Tabs).
-    1. **Session & Setup**:
-        - Live-Timing (Aktuelle Runde, Beste Runde, Sektoren).
-        - **NEU:** Sektorzeiten farbig markiert (Grün = Schneller/Gleich, Rot = Langsamer als Session-Best).
-        - **NEU (v1.1):** Anzeige der aktuell gefahrenen Kilometer (Analyse-Fortschritt).
-        - **NEU (v1.1):** Indikator für Setup-Änderungseffektivität (Positiv/Negativ) nach Boxenstopp.
-        - **NEU (v1.1):** Unterscheidung der Session-Typen (Training, Quali, Rennen).
-        - **NEU (v1.1):** Deaktivierung von Setup-Empfehlungen im Rennen.
-        - **NEU (v1.1):** Anzeige von Gegner-Informationen (falls verfügbar).
-        - Race Engineer Feedback (Text & Warnungen).
-    2. **Track Map**:
-        - Dynamische Streckenkarte.
-        - Farbcodierung nach Geschwindigkeit.
-        - Markierung der engsten Kurve (Ausnahme: Boxengasse/Ungültige Runden).
-        - **NEU (v1.1):** Markierung des Bremspunktes vor Kurven.
-    3. **Lap Times**:
-        - Tabelle aller gefahrenen Runden.
-        - Spalten: Runde, Zeit, Sektor 1, **Setup / Notes**.
-        - **NEU:** Automatische Speicherung der Setup-Empfehlung zu jeder Runde.
+Fahrphysik:
 
-## 5. Nicht-Funktionale Anforderungen
-- **Performance**: Geringe CPU-Last, da Overlay parallel zum Spiel läuft.
-- **Stabilität**: Robustheit gegen Spiel-Pausen, Neustarts und Zeit-Resets (Time Trial).
-- **Usability**: "Always on Top" Fenster, gut lesbar (Dark Mode).
+Geschwindigkeit (Car Speed) vs. Radgeschwindigkeiten (Wheel Speeds FL/FR/RL/RR) -> Erkennung von Blockieren/Durchdrehen.
+
+Lenkwinkel (Steering Angle).
+
+Pedalstellungen (Throttle, Brake, Clutch).
+
+G-Kräfte (Lateral, Longitudinal, Vertical).
+
+Gierrate (Yaw Rate) -> Erkennung von Rutschwinkeln.
+
+Fahrwerk & Reifen:
+
+Reifentemperaturen (Innen, Mitte, Außen) -> Erkennung Sturz/Druck.
+
+Reifendrücke.
+
+Federweg (Suspension Travel) -> Erkennung von Aufsetzen (Bottoming) oder Ausfedern.
+
+Reifenabnutzung.
+
+3.2 Datenverarbeitung & Logik (Core Engine)
+3.2.1 Phasen-Erkennung (Corner Phase Detection)
+Das System muss die Kurvenfahrt in fünf Phasen unterteilen, um Setup-Tipps korrekt zuzuordnen:
+
+Braking Zone: Hohe negative Longitudinal-G-Kräfte + Bremsdruck > 0.
+
+Turn-In (Einlenken): Bremsdruck fällt, Lenkwinkel steigt, Laterale G-Kräfte steigen.
+
+Mid-Corner (Scheitel): Maximale Laterale G-Kräfte, minimale Pedal-Eingabe.
+
+Corner Exit (Ausgang): Lenkwinkel nimmt ab, Gaspedal steigt.
+
+Straight (Gerade): Lenkung ~0, Vollgas.
+
+3.2.2 Analyse-Module ("Chris Haye Logic")
+Das System prüft in jeder Phase auf Anomalien und speichert folgende Events:
+
+A. Brems-Analyse
+
+Regel 1 (Front Lockup): WheelSpeed_Front < CarSpeed (signifikant).
+
+-> Vorschlag: "Bremsbalance nach hinten."
+
+Regel 2 (Rear Lockup/Instability): WheelSpeed_Rear < CarSpeed ODER Gierrate instabil beim Bremsen.
+
+-> Vorschlag: "Bremsbalance nach vorne", "Dämpfer (Bump) weicher", "Motorbremse reduzieren."
+
+Regel 3 (Bottoming): SuspensionTravel == 0 (Anschlag) beim Bremsen.
+
+-> Vorschlag: "Bodenfreiheit erhöhen", "Federn vorne härter", "Bump Stop Range prüfen."
+
+B. Einlenkverhalten (Turn-In)
+
+Regel 1 (Untersteuern): Hoher Lenkwinkel aber geringe Gierrate/Rotation.
+
+-> Vorschlag: "Reifendruck Vorderachse prüfen", "Stabi (ARB) vorne weicher", "Vorspur (Toe-out) vergrößern", "Diff-Coast verringern."
+
+Regel 2 (Übersteuern/Lift-off): Heck bricht aus beim Lösen der Bremse/Gas.
+
+-> Vorschlag: "Diff-Coast erhöhen (Sperre)", "Diff-Preload erhöhen", "Stabi vorne härter."
+
+C. Kurvenausgang (Exit)
+
+Regel 1 (Power Oversteer): Throttle > 50% UND YawRate > Threshold (Heck kommt).
+
+-> Vorschlag: "Stabi hinten weicher", "Diff-Power reduzieren (weniger Sperre)", "Federn hinten weicher."
+
+-> High Speed: "Heckflügel erhöhen."
+
+Regel 2 (Untersteuern am Ausgang): Fahrzeug schiebt trotz Lenkung nach außen.
+
+-> Vorschlag: "Stabi hinten härter", "Diff-Power erhöhen", "Federn hinten härter."
+
+D. Reifen-Thermo-Analyse
+
+Temp Innen >> Temp Außen: -> Vorschlag: "Negativen Sturz (Camber) verringern."
+
+Temp Mitte > Temp (Innen/Außen): -> Vorschlag: "Reifendruck verringern."
+
+Temp Ränder > Temp Mitte: -> Vorschlag: "Reifendruck erhöhen."
+
+Allgemein zu heiß: -> Vorschlag: "Bremskühlung öffnen" (falls Felgenheizung) oder "Drücke erhöhen (weniger Walken)."
+
+E. Konsistenz-Check ("PICNIC"-Filter)
+
+Bevor ein Setup-Tipp gegeben wird, muss das Problem in mindestens 3 Runden an derselben Stelle auftreten.
+
+Tritt das Problem zufällig auf -> Meldung: "Fahrstil inkonsistent. Kein Setup-Rat möglich."
+
+3.3 Speicherung
+Session-Log: CSV mit allen Telemetriedaten (optional, da groß).
+
+Analysis-Log: JSON/CSV Datenbank mit:
+
+Runde #
+
+Sektor / Kurve #
+
+Erkanntes Problem (z.B. "Lockup Front")
+
+Generierter Vorschlag
+
+Persistenz bei Boxenstopp: Analyse-Daten werden bei Boxenstopp nicht gelöscht, sondern als "Stint 1", "Stint 2" markiert, um Änderungen zu vergleichen.
+
+4. Benutzeroberfläche (UI) - PyQt6
+Das Layout wird in drei Haupt-Tabs unterteilt:
+
+4.1 Tab 1: "Live Dashboard" (Während der Fahrt)
+Fokus: Wichtige Infos auf einen Blick (große Schrift).
+
+Elemente:
+
+Delta zur Bestzeit.
+
+Reifentemperaturen (Farblich codiert: Blau/Grün/Rot).
+
+Engineer-Message: Nur kritische Kurznachrichten (z.B. "Reifen VL überhitzt!", "Bremsbalance optimieren").
+
+Sektor-Zeiten (Grün/Lila/Rot).
+
+4.2 Tab 2: "Setup Engineer" (In der Box/Pause)
+Fokus: Detaillierte Analyse und Setup-Arbeit.
+
+Layout:
+
+Linke Spalte (Problem-Liste): Liste aller erkannten Probleme, sortiert nach Häufigkeit (z.B. "5x Untersteuern Kurve 3").
+
+Rechte Spalte (Lösungs-Wizard): Detailansicht des gewählten Problems.
+
+Anzeige des entsprechenden "Chris Haye"-Textbausteins.
+
+Konkrete Handlungsanweisung (z.B. "Ändere Front ARB von 5 auf 4").
+
+Effektivitäts-Anzeige: Vergleicht aktuelle Probleme mit denen des vorherigen Stints (Ist es besser geworden?).
+
+4.3 Tab 3: "Track & Data"
+Dynamische Streckenkarte:
+
+Zeichnet die gefahrene Linie.
+
+Event-Marker: Farbige Punkte auf der Karte an den Stellen, wo Probleme erkannt wurden (Rot = Übersteuern, Gelb = Blockieren).
+
+Telemetrie-Graphen: Einfache Plots für Speed, Brake, Throttle der schnellsten Runde.
+
+5. Nicht-Funktionale Anforderungen
+Performance: Die Analyse-Logik (Regelprüfung) darf den Main-Render-Loop des Overlays nicht blockieren (Multithreading für Datenverarbeitung).
+
+Robustheit:
+
+Ignorieren von "Outlaps" (kalte Reifen verfälschen Analyse).
+
+Mindestdistanz für Analyse: 10 km oder 3 Runden (konfigurierbar).
+
+Usability: "Dark Mode" als Standard, um Blendung bei Nachtfahrten im Simulator zu vermeiden.
+
+Erweiterbarkeit: Die Regel-Sets (Setup-Tipps) sollten in einer separaten Konfigurationsdatei (JSON/YAML) liegen, um sie leicht anpassen zu können, ohne den Code neu zu kompilieren.
